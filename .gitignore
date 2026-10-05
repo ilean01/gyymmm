@@ -15,13 +15,20 @@ api/.dev.vars
 api/.wrangler/
 
 # Logs
+logs
 *.log
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
 
 # macOS
 .DS_Store
 
 # Tests
 coverage/
+
+# Editor
+.vscode/
+.idea/
