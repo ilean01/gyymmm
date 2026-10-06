@@ -1,6 +1,36 @@
 @import "tailwindcss";
+
+@theme {
+  /* GymBro core palette */
+  --color-gym-bg: #0B0D12;
+  --color-gym-card: #161A22;
+  --color-gym-card-hover: #1C212B;
+  --color-gym-border: #2A2F3A;
+  --color-gym-text: #F2F4F8;
+  --color-gym-muted: #A7B0C0;
+  --color-gym-accent: #DC2626;
+
+  /* Alerts never use the red interaction color */
+  --color-gym-warning: #FACC15;
+  --color-gym-error: #F97316;
+
+  /* Shared shape */
+  --radius-gym-sm: 0.625rem;
+  --radius-gym: 0.875rem;
+  --radius-gym-lg: 1.125rem;
+
+  /* Shared elevation */
+  --shadow-gym: 0 12px 32px rgb(0 0 0 / 0.22);
+}
+
 :root {
-  font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  color-scheme: dark;
+  font-family:
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    'Segoe UI',
+    sans-serif;
   color: #F2F4F8;
   background: #0B0D12;
   font-synthesis: none;
@@ -31,4 +61,21 @@ input,
 textarea,
 select {
   font: inherit;
+}
+
+button,
+a,
+input,
+select,
+textarea {
+  -webkit-tap-highlight-color: transparent;
+}
+
+button {
+  min-height: 44px;
+}
+
+:focus-visible {
+  outline: 2px solid #FACC15;
+  outline-offset: 3px;
 }
