@@ -78,3 +78,29 @@ button {
   outline: 2px solid #FACC15;
   outline-offset: 3px;
 }
+
+
+/* App shell + iPhone/iPad safe areas */
+.gym-safe-screen {
+  padding-top: env(safe-area-inset-top, 0px);
+  padding-right: env(safe-area-inset-right, 0px);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+  padding-left: env(safe-area-inset-left, 0px);
+}
+
+@supports (height: 100dvh) {
+  html,
+  body,
+  #root {
+    min-height: 100dvh;
+  }
+}
+
+@media (min-width: 768px) {
+  .gym-safe-screen {
+    padding-top: max(env(safe-area-inset-top, 0px), 0px);
+    padding-right: max(env(safe-area-inset-right, 0px), 0px);
+    padding-bottom: max(env(safe-area-inset-bottom, 0px), 0px);
+    padding-left: max(env(safe-area-inset-left, 0px), 0px);
+  }
+}
