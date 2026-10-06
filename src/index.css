@@ -104,3 +104,8 @@ button {
     padding-left: max(env(safe-area-inset-left, 0px), 0px);
   }
 }
+
+
+.gym-mobile-bottom-nav {
+  padding-bottom: max(env(safe-area-inset-bottom, 0px), 0.5rem);
+}
