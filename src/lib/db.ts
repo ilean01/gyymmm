@@ -373,6 +373,90 @@ export async function markSyncFailure(
   }
 }
 
+export async function mergeRemoteWorkoutData(
+  remoteSessions: WorkoutSession[],
+  remoteSets: WorkoutSet[],
+): Promise<{ sessions: number; sets: number }> {
+  const db = await openGymBroDb()
+
+  try {
+    const transaction = db.transaction(
+      [STORES.sessions, STORES.sets, STORES.syncQueue],
+      'readwrite',
+    )
+    const sessionsStore = transaction.objectStore(STORES.sessions)
+    const setsStore = transaction.objectStore(STORES.sets)
+    const queueStore = transaction.objectStore(STORES.syncQueue)
+
+    let mergedSessions = 0
+    let mergedSets = 0
+
+    const queueRequest = queueStore.getAll()
+
+    queueRequest.onsuccess = () => {
+      const queue = queueRequest.result as SyncQueueItem[]
+      const pendingIds = new Set(queue.map((item) => item.id))
+
+      for (const remoteSession of remoteSessions) {
+        if (pendingIds.has(`workoutSession:${remoteSession.id}`)) {
+          continue
+        }
+
+        const localRequest = sessionsStore.get(remoteSession.id)
+
+        localRequest.onsuccess = () => {
+          const local = localRequest.result as WorkoutSession | undefined
+
+          if (
+            !local ||
+            new Date(remoteSession.updatedAt).getTime() >=
+              new Date(local.updatedAt).getTime()
+          ) {
+            sessionsStore.put({
+              ...remoteSession,
+              syncState: 'synced',
+            })
+            mergedSessions += 1
+          }
+        }
+      }
+
+      for (const remoteSet of remoteSets) {
+        if (pendingIds.has(`workoutSet:${remoteSet.id}`)) {
+          continue
+        }
+
+        const localRequest = setsStore.get(remoteSet.id)
+
+        localRequest.onsuccess = () => {
+          const local = localRequest.result as WorkoutSet | undefined
+
+          if (
+            !local ||
+            new Date(remoteSet.updatedAt).getTime() >=
+              new Date(local.updatedAt).getTime()
+          ) {
+            setsStore.put({
+              ...remoteSet,
+              syncState: 'synced',
+            })
+            mergedSets += 1
+          }
+        }
+      }
+    }
+
+    await transactionDone(transaction)
+
+    return {
+      sessions: mergedSessions,
+      sets: mergedSets,
+    }
+  } finally {
+    db.close()
+  }
+}
+
 export async function getPendingSyncCount(): Promise<number> {
   const db = await openGymBroDb()
 
