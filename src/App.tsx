@@ -3,10 +3,17 @@ import type { FormEvent } from 'react'
 import {
   clearWorkoutTestData,
   getSyncQueue,
+  getWorkoutSession,
   getWorkoutSets,
+  saveWorkoutSession,
   saveWorkoutSet,
 } from './lib/db'
-import type { SyncQueueItem, WorkoutSet } from './types/training'
+import { syncPendingChanges } from './lib/sync'
+import type {
+  SyncQueueItem,
+  WorkoutSession,
+  WorkoutSet,
+} from './types/training'
 
 function App() {
   const [sets, setSets] = useState<WorkoutSet[]>([])
@@ -14,6 +21,7 @@ function App() {
   const [weight, setWeight] = useState('20')
   const [reps, setReps] = useState('10')
   const [isOnline, setIsOnline] = useState(navigator.onLine)
+  const [isSyncing, setIsSyncing] = useState(false)
   const [message, setMessage] = useState('')
 
   async function refreshLocalState() {
@@ -26,15 +34,69 @@ function App() {
     setQueue(pendingQueue)
   }
 
+  async function handleSync(showMessage = true) {
+    if (!navigator.onLine) {
+      if (showMessage) {
+        setMessage('Sin Internet. Los cambios siguen guardados en este dispositivo.')
+      }
+      return
+    }
+
+    setIsSyncing(true)
+
+    try {
+      const summary = await syncPendingChanges()
+      await refreshLocalState()
+
+      if (showMessage) {
+        if (summary.failed > 0) {
+          setMessage(
+            `Se sincronizaron ${summary.synced} cambios y ${summary.failed} quedaron pendientes para reintentar.`,
+          )
+        } else if (summary.synced > 0) {
+          setMessage(
+            `${summary.synced} ${summary.synced === 1 ? 'cambio sincronizado' : 'cambios sincronizados'} con Cloudflare.`,
+          )
+        } else {
+          setMessage('No había cambios pendientes para sincronizar.')
+        }
+      }
+    } catch {
+      if (showMessage) {
+        setMessage('No se pudo completar la sincronización. Los datos locales siguen seguros.')
+      }
+      await refreshLocalState()
+    } finally {
+      setIsSyncing(false)
+    }
+  }
+
   useEffect(() => {
-    refreshLocalState().catch(() =>
-      setMessage('No se pudo abrir el almacenamiento local.'),
-    )
+    const initialize = async () => {
+      try {
+        await refreshLocalState()
+
+        if (navigator.onLine) {
+          await handleSync(false)
+        }
+      } catch {
+        setMessage('No se pudo abrir el almacenamiento local.')
+      }
+    }
+
+    void initialize()
   }, [])
 
   useEffect(() => {
-    const handleOnline = () => setIsOnline(true)
-    const handleOffline = () => setIsOnline(false)
+    const handleOnline = () => {
+      setIsOnline(true)
+      void handleSync(true)
+    }
+
+    const handleOffline = () => {
+      setIsOnline(false)
+      setMessage('Sin conexión. GymBro seguirá guardando los cambios localmente.')
+    }
 
     window.addEventListener('online', handleOnline)
     window.addEventListener('offline', handleOffline)
@@ -44,6 +106,26 @@ function App() {
       window.removeEventListener('offline', handleOffline)
     }
   }, [])
+
+  async function ensureTestSession(now: string) {
+    const existingSession = await getWorkoutSession('offline-test-session')
+
+    if (existingSession) {
+      return
+    }
+
+    const session: WorkoutSession = {
+      id: 'offline-test-session',
+      routineName: 'Rutina offline de prueba',
+      startedAt: now,
+      completedAt: null,
+      status: 'active',
+      syncState: 'pending',
+      updatedAt: now,
+    }
+
+    await saveWorkoutSession(session)
+  }
 
   async function handleSave(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -62,6 +144,7 @@ function App() {
     }
 
     const now = new Date().toISOString()
+
     const workoutSet: WorkoutSet = {
       id: crypto.randomUUID(),
       sessionId: 'offline-test-session',
@@ -76,9 +159,16 @@ function App() {
     }
 
     try {
+      await ensureTestSession(now)
       await saveWorkoutSet(workoutSet)
       await refreshLocalState()
-      setMessage('Serie guardada y agregada a la cola de sincronización.')
+
+      if (navigator.onLine) {
+        setMessage('Guardado localmente. Sincronizando con Cloudflare…')
+        await handleSync(true)
+      } else {
+        setMessage('Serie guardada. Se sincronizará cuando vuelva Internet.')
+      }
     } catch {
       setMessage('No se pudo guardar la serie.')
     }
@@ -88,7 +178,7 @@ function App() {
     try {
       await clearWorkoutTestData()
       await refreshLocalState()
-      setMessage('Datos y cola de prueba eliminados.')
+      setMessage('Datos y cola de prueba eliminados de este dispositivo.')
     } catch {
       setMessage('No se pudieron eliminar los datos de prueba.')
     }
@@ -114,13 +204,13 @@ function App() {
         </div>
 
         <h1 className="font-display mt-2 text-5xl font-extrabold uppercase leading-[0.9] tracking-tight">
-          Cola de sincronización
+          Sincronización real
         </h1>
 
         <p className="mt-5 max-w-md text-base leading-7 text-gym-muted">
-          Cada cambio se guarda primero en este dispositivo y, al mismo tiempo,
-          entra en una cola pendiente. Más adelante el servidor leerá esta cola
-          y confirmará qué cambios ya quedaron sincronizados.
+          GymBro guarda primero en IndexedDB. Cuando hay Internet, envía la cola
+          a tu API pública de Cloudflare y solo elimina una tarea cuando el
+          servidor confirma que fue guardada.
         </p>
 
         <div className="mt-6 rounded-gym border border-gym-warning/40 bg-gym-warning/10 p-4">
@@ -129,9 +219,24 @@ function App() {
           </p>
           <p className="mt-1 text-sm leading-6 text-gym-muted">
             {isOnline
-              ? 'Hay Internet, pero todavía no conectamos el servidor. La cola permanece intacta hasta recibir confirmación real.'
-              : 'Sin Internet: podés seguir entrenando. La cola queda guardada en IndexedDB y no se pierde al cerrar GymBro.'}
+              ? isSyncing
+                ? 'Sincronizando con Cloudflare…'
+                : queue.length > 0
+                  ? 'Hay Internet. GymBro reintentará estos cambios hasta recibir confirmación.'
+                  : 'Todo lo pendiente de este dispositivo fue confirmado por el servidor.'
+              : 'Podés seguir entrenando sin señal. La cola permanece guardada en IndexedDB.'}
           </p>
+
+          {isOnline && (
+            <button
+              type="button"
+              onClick={() => void handleSync(true)}
+              disabled={isSyncing}
+              className="mt-3 min-h-11 w-full rounded-gym border border-gym-warning/40 px-4 py-2 font-semibold text-gym-warning disabled:opacity-50"
+            >
+              {isSyncing ? 'Sincronizando…' : 'Sincronizar ahora'}
+            </button>
+          )}
         </div>
 
         <form
@@ -175,7 +280,7 @@ function App() {
             type="submit"
             className="mt-5 w-full rounded-gym bg-gym-accent px-6 py-3 font-semibold text-white transition hover:brightness-110 active:scale-[0.99]"
           >
-            Guardar y encolar
+            Guardar serie
           </button>
 
           {message && (
@@ -188,7 +293,7 @@ function App() {
         <div className="mt-4 rounded-gym-lg border border-gym-border bg-gym-card p-5">
           <div className="flex items-end justify-between gap-4">
             <div>
-              <p className="text-sm text-gym-muted">Guardadas localmente</p>
+              <p className="text-sm text-gym-muted">Guardadas en este dispositivo</p>
               <h2 className="font-display mt-1 text-3xl font-bold uppercase">
                 Series
               </h2>
@@ -257,8 +362,13 @@ function App() {
                     </span>
                   </div>
                   <p className="mt-1 break-all text-xs text-gym-muted">
-                    {item.operation} · {item.entityId}
+                    {item.operation} · intento {item.attempts} · {item.entityId}
                   </p>
+                  {item.lastError && (
+                    <p className="mt-1 text-xs text-gym-warning">
+                      Último error: {item.lastError}
+                    </p>
+                  )}
                 </div>
               ))}
             </div>
