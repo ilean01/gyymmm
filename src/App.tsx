@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
 import { AppShell, PageSection } from './components/layout/AppShell'
+import { DesktopSidebar } from './components/navigation/DesktopSidebar'
 import {
   MobileBottomNav,
   type MobileNavItemId,
@@ -276,7 +277,7 @@ function App() {
     }
   }
 
-  function handleMobileNavigation(item: MobileNavItemId) {
+  function handleNavigation(item: MobileNavItemId) {
     setActiveSection(item)
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
@@ -287,7 +288,13 @@ function App() {
       mobileNavigation={
         <MobileBottomNav
           activeItem={activeSection}
-          onChange={handleMobileNavigation}
+          onChange={handleNavigation}
+        />
+      }
+      desktopNavigation={
+        <DesktopSidebar
+          activeItem={activeSection}
+          onChange={handleNavigation}
         />
       }
     >
@@ -504,8 +511,8 @@ function App() {
 
           <Card className="mt-6">
             <StatePanel
-              title="Navegación móvil lista"
-              description="Esta pestaña ya funciona y conserva su estado activo. El contenido definitivo se incorporará en su punto correspondiente del checklist."
+              title="Navegación lista"
+              description="Esta pestaña ya funciona tanto desde la barra móvil como desde el sidebar de notebook. El contenido definitivo se incorporará en su punto correspondiente del checklist."
             />
           </Card>
         </PageSection>
