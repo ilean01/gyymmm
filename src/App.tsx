@@ -1,23 +1,35 @@
 import { useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
 import {
-  clearWorkoutSets,
+  clearWorkoutTestData,
+  getSyncQueue,
   getWorkoutSets,
   saveWorkoutSet,
 } from './lib/db'
-import type { WorkoutSet } from './types/training'
+import type { SyncQueueItem, WorkoutSet } from './types/training'
 
 function App() {
   const [sets, setSets] = useState<WorkoutSet[]>([])
+  const [queue, setQueue] = useState<SyncQueueItem[]>([])
   const [weight, setWeight] = useState('20')
   const [reps, setReps] = useState('10')
   const [isOnline, setIsOnline] = useState(navigator.onLine)
   const [message, setMessage] = useState('')
 
+  async function refreshLocalState() {
+    const [storedSets, pendingQueue] = await Promise.all([
+      getWorkoutSets(),
+      getSyncQueue(),
+    ])
+
+    setSets(storedSets)
+    setQueue(pendingQueue)
+  }
+
   useEffect(() => {
-    getWorkoutSets()
-      .then(setSets)
-      .catch(() => setMessage('No se pudo abrir el almacenamiento local.'))
+    refreshLocalState().catch(() =>
+      setMessage('No se pudo abrir el almacenamiento local.'),
+    )
   }, [])
 
   useEffect(() => {
@@ -39,7 +51,12 @@ function App() {
     const weightKg = Number(weight.replace(',', '.'))
     const repsValue = Number(reps)
 
-    if (!Number.isFinite(weightKg) || weightKg < 0 || !Number.isInteger(repsValue) || repsValue <= 0) {
+    if (
+      !Number.isFinite(weightKg) ||
+      weightKg < 0 ||
+      !Number.isInteger(repsValue) ||
+      repsValue <= 0
+    ) {
       setMessage('Revisá el peso y las repeticiones.')
       return
     }
@@ -54,15 +71,14 @@ function App() {
       weightKg,
       reps: repsValue,
       completedAt: now,
-      syncState: 'local',
+      syncState: 'pending',
       updatedAt: now,
     }
 
     try {
       await saveWorkoutSet(workoutSet)
-      const updatedSets = await getWorkoutSets()
-      setSets(updatedSets)
-      setMessage('Serie guardada en este dispositivo.')
+      await refreshLocalState()
+      setMessage('Serie guardada y agregada a la cola de sincronización.')
     } catch {
       setMessage('No se pudo guardar la serie.')
     }
@@ -70,9 +86,9 @@ function App() {
 
   async function handleClear() {
     try {
-      await clearWorkoutSets()
-      setSets([])
-      setMessage('Datos de prueba eliminados.')
+      await clearWorkoutTestData()
+      await refreshLocalState()
+      setMessage('Datos y cola de prueba eliminados.')
     } catch {
       setMessage('No se pudieron eliminar los datos de prueba.')
     }
@@ -98,17 +114,29 @@ function App() {
         </div>
 
         <h1 className="font-display mt-2 text-5xl font-extrabold uppercase leading-[0.9] tracking-tight">
-          Datos offline
+          Cola de sincronización
         </h1>
 
         <p className="mt-5 max-w-md text-base leading-7 text-gym-muted">
-          Esta prueba guarda una serie de Hip Thrust directamente en IndexedDB,
-          dentro de este dispositivo. No necesita Internet para conservarla.
+          Cada cambio se guarda primero en este dispositivo y, al mismo tiempo,
+          entra en una cola pendiente. Más adelante el servidor leerá esta cola
+          y confirmará qué cambios ya quedaron sincronizados.
         </p>
+
+        <div className="mt-6 rounded-gym border border-gym-warning/40 bg-gym-warning/10 p-4">
+          <p className="font-semibold text-gym-warning">
+            {queue.length} {queue.length === 1 ? 'cambio pendiente' : 'cambios pendientes'}
+          </p>
+          <p className="mt-1 text-sm leading-6 text-gym-muted">
+            {isOnline
+              ? 'Hay Internet, pero todavía no conectamos el servidor. La cola permanece intacta hasta recibir confirmación real.'
+              : 'Sin Internet: podés seguir entrenando. La cola queda guardada en IndexedDB y no se pierde al cerrar GymBro.'}
+          </p>
+        </div>
 
         <form
           onSubmit={handleSave}
-          className="mt-8 rounded-gym-lg border border-gym-border bg-gym-card p-5 shadow-gym"
+          className="mt-4 rounded-gym-lg border border-gym-border bg-gym-card p-5 shadow-gym"
         >
           <p className="text-sm text-gym-muted">Ejercicio de prueba</p>
           <h2 className="font-display mt-1 text-3xl font-bold uppercase">
@@ -147,7 +175,7 @@ function App() {
             type="submit"
             className="mt-5 w-full rounded-gym bg-gym-accent px-6 py-3 font-semibold text-white transition hover:brightness-110 active:scale-[0.99]"
           >
-            Guardar serie en el dispositivo
+            Guardar y encolar
           </button>
 
           {message && (
@@ -184,7 +212,7 @@ function App() {
                   <div>
                     <p className="font-semibold">{set.exerciseName}</p>
                     <p className="text-xs text-gym-muted">
-                      Serie {set.setNumber} · guardada localmente
+                      Serie {set.setNumber} · {set.syncState === 'synced' ? 'sincronizada' : 'pendiente'}
                     </p>
                   </div>
                   <p className="font-display text-2xl font-bold">
@@ -194,8 +222,49 @@ function App() {
               ))}
             </div>
           )}
+        </div>
 
-          {sets.length > 0 && (
+        <div className="mt-4 rounded-gym-lg border border-gym-border bg-gym-card p-5">
+          <div className="flex items-end justify-between gap-4">
+            <div>
+              <p className="text-sm text-gym-muted">Outbox local</p>
+              <h2 className="font-display mt-1 text-3xl font-bold uppercase">
+                Pendientes
+              </h2>
+            </div>
+            <p className="font-display text-4xl font-bold text-gym-warning">
+              {queue.length}
+            </p>
+          </div>
+
+          {queue.length === 0 ? (
+            <p className="mt-4 text-sm text-gym-muted">
+              No hay cambios esperando sincronización.
+            </p>
+          ) : (
+            <div className="mt-4 space-y-2">
+              {queue.slice(0, 5).map((item) => (
+                <div
+                  key={item.id}
+                  className="rounded-gym border border-gym-border bg-gym-bg px-4 py-3"
+                >
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="font-semibold">
+                      {item.entityType === 'workoutSet' ? 'Serie' : 'Entrenamiento'}
+                    </p>
+                    <span className="rounded-full border border-gym-warning/40 px-2 py-1 text-xs font-semibold text-gym-warning">
+                      Pendiente
+                    </span>
+                  </div>
+                  <p className="mt-1 break-all text-xs text-gym-muted">
+                    {item.operation} · {item.entityId}
+                  </p>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {(sets.length > 0 || queue.length > 0) && (
             <button
               type="button"
               onClick={handleClear}
