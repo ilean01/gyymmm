@@ -80,7 +80,7 @@ async function runSync(): Promise<SyncSummary> {
       const message =
         error instanceof Error ? error.message : 'Error desconocido de sincronización.'
 
-      await markSyncFailure(item.id, message)
+      await markSyncFailure(item, message)
       summary.failed += 1
 
       // Si falla una sesión, sus series podrían depender de ella.
