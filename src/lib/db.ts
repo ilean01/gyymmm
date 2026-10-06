@@ -6,7 +6,7 @@ import type {
 } from '../types/training'
 
 const DB_NAME = 'gymbro-db'
-const DB_VERSION = 2
+const DB_VERSION = 3
 
 const STORES = {
   sessions: 'workoutSessions',
@@ -124,6 +124,45 @@ export function openGymBroDb(): Promise<IDBDatabase> {
         migrateStore(STORES.sets, 'workoutSet')
         migrateStore(STORES.sessions, 'workoutSession')
       }
+
+      if (oldVersion < 3 && upgradeTransaction) {
+        const sessionsStore = upgradeTransaction.objectStore(STORES.sessions)
+        const setsStore = upgradeTransaction.objectStore(STORES.sets)
+        const queueStore = upgradeTransaction.objectStore(STORES.syncQueue)
+        const sessionRequest = sessionsStore.get('offline-test-session')
+
+        sessionRequest.onsuccess = () => {
+          if (sessionRequest.result) {
+            return
+          }
+
+          const cursorRequest = setsStore.openCursor()
+
+          cursorRequest.onsuccess = () => {
+            const cursor = cursorRequest.result
+
+            if (!cursor) {
+              return
+            }
+
+            const firstSet = cursor.value as WorkoutSet
+            const session: WorkoutSession = {
+              id: 'offline-test-session',
+              routineName: 'Rutina offline de prueba',
+              startedAt: firstSet.completedAt,
+              completedAt: null,
+              status: 'active',
+              syncState: 'pending',
+              updatedAt: firstSet.updatedAt,
+            }
+
+            sessionsStore.put(session)
+            queueStore.put(
+              makeQueueItem('workoutSession', session.id, session),
+            )
+          }
+        }
+      }
     }
 
     request.onsuccess = () => resolve(request.result)
@@ -163,6 +202,24 @@ export async function saveWorkoutSession(
     transaction.objectStore(STORES.syncQueue).put(queueItem)
 
     await transactionDone(transaction)
+  } finally {
+    db.close()
+  }
+}
+
+export async function getWorkoutSession(
+  id: string,
+): Promise<WorkoutSession | undefined> {
+  const db = await openGymBroDb()
+
+  try {
+    const transaction = db.transaction(STORES.sessions, 'readonly')
+    const request = transaction.objectStore(STORES.sessions).get(id)
+    const session = (await requestToPromise(request)) as
+      | WorkoutSession
+      | undefined
+    await transactionDone(transaction)
+    return session
   } finally {
     db.close()
   }
@@ -229,6 +286,93 @@ export async function getSyncQueue(): Promise<SyncQueueItem[]> {
   }
 }
 
+export async function markSyncSuccess(
+  item: SyncQueueItem,
+): Promise<void> {
+  const db = await openGymBroDb()
+
+  try {
+    const entityStoreName =
+      item.entityType === 'workoutSession' ? STORES.sessions : STORES.sets
+
+    const transaction = db.transaction(
+      [entityStoreName, STORES.syncQueue],
+      'readwrite',
+    )
+    const queueStore = transaction.objectStore(STORES.syncQueue)
+    const entityStore = transaction.objectStore(entityStoreName)
+    const queueRequest = queueStore.get(item.id)
+
+    queueRequest.onsuccess = () => {
+      const currentQueueItem = queueRequest.result as
+        | SyncQueueItem
+        | undefined
+
+      if (
+        !currentQueueItem ||
+        currentQueueItem.updatedAt !== item.updatedAt
+      ) {
+        return
+      }
+
+      const entityRequest = entityStore.get(item.entityId)
+
+      entityRequest.onsuccess = () => {
+        const entity = entityRequest.result as
+          | WorkoutSession
+          | WorkoutSet
+          | undefined
+        const payload = item.payload as WorkoutSession | WorkoutSet
+
+        if (entity && entity.updatedAt === payload.updatedAt) {
+          entityStore.put({
+            ...entity,
+            syncState: 'synced',
+          })
+        }
+
+        queueStore.delete(item.id)
+      }
+    }
+
+    await transactionDone(transaction)
+  } finally {
+    db.close()
+  }
+}
+
+export async function markSyncFailure(
+  queueItemId: string,
+  errorMessage: string,
+): Promise<void> {
+  const db = await openGymBroDb()
+
+  try {
+    const transaction = db.transaction(STORES.syncQueue, 'readwrite')
+    const store = transaction.objectStore(STORES.syncQueue)
+    const request = store.get(queueItemId)
+
+    request.onsuccess = () => {
+      const current = request.result as SyncQueueItem | undefined
+
+      if (!current) {
+        return
+      }
+
+      store.put({
+        ...current,
+        attempts: current.attempts + 1,
+        lastError: errorMessage,
+        updatedAt: new Date().toISOString(),
+      })
+    }
+
+    await transactionDone(transaction)
+  } finally {
+    db.close()
+  }
+}
+
 export async function getPendingSyncCount(): Promise<number> {
   const db = await openGymBroDb()
 
@@ -248,10 +392,11 @@ export async function clearWorkoutTestData(): Promise<void> {
 
   try {
     const transaction = db.transaction(
-      [STORES.sets, STORES.syncQueue],
+      [STORES.sessions, STORES.sets, STORES.syncQueue],
       'readwrite',
     )
 
+    transaction.objectStore(STORES.sessions).clear()
     transaction.objectStore(STORES.sets).clear()
     transaction.objectStore(STORES.syncQueue).clear()
 
