@@ -49,16 +49,19 @@ function App() {
       await refreshLocalState()
 
       if (showMessage) {
+        const downloaded =
+          summary.downloadedSessions + summary.downloadedSets
+
         if (summary.failed > 0) {
           setMessage(
-            `Se sincronizaron ${summary.synced} cambios y ${summary.failed} quedaron pendientes para reintentar.`,
+            `Subidos: ${summary.synced} · descargados: ${downloaded} · ${summary.failed} quedaron pendientes.`,
           )
-        } else if (summary.synced > 0) {
+        } else if (summary.synced > 0 || downloaded > 0) {
           setMessage(
-            `${summary.synced} ${summary.synced === 1 ? 'cambio sincronizado' : 'cambios sincronizados'} con Cloudflare.`,
+            `Sincronización completa: ${summary.synced} subidos y ${downloaded} descargados desde Cloudflare.`,
           )
         } else {
-          setMessage('No había cambios pendientes para sincronizar.')
+          setMessage('Este dispositivo ya está al día con Cloudflare.')
         }
       }
     } catch {
@@ -204,13 +207,13 @@ function App() {
         </div>
 
         <h1 className="font-display mt-2 text-5xl font-extrabold uppercase leading-[0.9] tracking-tight">
-          Sincronización real
+          Sincronización bidireccional
         </h1>
 
         <p className="mt-5 max-w-md text-base leading-7 text-gym-muted">
-          GymBro guarda primero en IndexedDB. Cuando hay Internet, envía la cola
-          a tu API pública de Cloudflare y solo elimina una tarea cuando el
-          servidor confirma que fue guardada.
+          GymBro guarda primero en IndexedDB. Cuando hay Internet, sube los
+          cambios pendientes a Cloudflare y también descarga los datos guardados
+          por otros dispositivos.
         </p>
 
         <div className="mt-6 rounded-gym border border-gym-warning/40 bg-gym-warning/10 p-4">
@@ -222,8 +225,8 @@ function App() {
               ? isSyncing
                 ? 'Sincronizando con Cloudflare…'
                 : queue.length > 0
-                  ? 'Hay Internet. GymBro reintentará estos cambios hasta recibir confirmación.'
-                  : 'Todo lo pendiente de este dispositivo fue confirmado por el servidor.'
+                  ? 'Hay Internet. GymBro reintentará estos cambios y después traerá la versión remota.'
+                  : 'La cola local está vacía. Podés sincronizar para buscar cambios de otros dispositivos.'
               : 'Podés seguir entrenando sin señal. La cola permanece guardada en IndexedDB.'}
           </p>
 
@@ -380,7 +383,7 @@ function App() {
               onClick={handleClear}
               className="mt-4 min-h-11 w-full rounded-gym border border-gym-border px-4 py-2 font-semibold text-gym-muted transition hover:bg-gym-card-hover"
             >
-              Borrar datos de prueba
+              Borrar copia local de prueba
             </button>
           )}
         </div>
