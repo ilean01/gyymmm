@@ -342,7 +342,7 @@ export async function markSyncSuccess(
 }
 
 export async function markSyncFailure(
-  queueItemId: string,
+  item: SyncQueueItem,
   errorMessage: string,
 ): Promise<void> {
   const db = await openGymBroDb()
@@ -350,12 +350,12 @@ export async function markSyncFailure(
   try {
     const transaction = db.transaction(STORES.syncQueue, 'readwrite')
     const store = transaction.objectStore(STORES.syncQueue)
-    const request = store.get(queueItemId)
+    const request = store.get(item.id)
 
     request.onsuccess = () => {
       const current = request.result as SyncQueueItem | undefined
 
-      if (!current) {
+      if (!current || current.updatedAt !== item.updatedAt) {
         return
       }
 
