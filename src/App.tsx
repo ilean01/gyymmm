@@ -146,7 +146,7 @@ function App() {
 
     const intervalId = window.setInterval(() => {
       void syncSilently()
-    }, 10000)
+    }, 5000)
 
     document.addEventListener('visibilitychange', handleVisible)
     window.addEventListener('focus', handleFocus)
@@ -275,7 +275,7 @@ function App() {
                 ? 'Sincronizando con Cloudflare…'
                 : queue.length > 0
                   ? 'Hay Internet. GymBro reintentará estos cambios automáticamente y después traerá la versión remota.'
-                  : 'Sincronización automática activa: GymBro busca cambios cada 10 segundos mientras está abierto.'
+                  : 'Sincronización automática activa: GymBro busca cambios cada 5 segundos mientras está abierto.'
               : 'Podés seguir entrenando sin señal. La cola permanece guardada en IndexedDB.'}
           </p>
 
