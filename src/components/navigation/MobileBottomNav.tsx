@@ -1,3 +1,5 @@
+import type { ReactNode } from 'react'
+
 export type MobileNavItemId = 'today' | 'routines' | 'progress' | 'coach'
 
 interface MobileBottomNavProps {
@@ -8,7 +10,7 @@ interface MobileBottomNavProps {
 interface NavItem {
   id: MobileNavItemId
   label: string
-  icon: JSX.Element
+  icon: ReactNode
 }
 
 const iconClass = 'size-6'
