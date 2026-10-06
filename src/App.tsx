@@ -2,6 +2,10 @@ import { useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
 import { AppShell, PageSection } from './components/layout/AppShell'
 import {
+  MobileBottomNav,
+  type MobileNavItemId,
+} from './components/navigation/MobileBottomNav'
+import {
   Badge,
   Button,
   Card,
@@ -23,6 +27,27 @@ import type {
   WorkoutSet,
 } from './types/training'
 
+const sectionCopy: Record<
+  Exclude<MobileNavItemId, 'today'>,
+  { title: string; description: string }
+> = {
+  routines: {
+    title: 'Rutinas',
+    description:
+      'Acá vas a crear, editar y organizar tus rutinas. La navegación ya está conectada; el contenido real se construirá en los puntos de Rutinas.',
+  },
+  progress: {
+    title: 'Progreso',
+    description:
+      'Acá aparecerán historial, volumen, récords y evolución. Por ahora dejamos solamente el destino de navegación.',
+  },
+  coach: {
+    title: 'Coach IA',
+    description:
+      'Esta sección queda reservada para el Coach IA. No mostramos recomendaciones ficticias antes de implementar su lógica real.',
+  },
+}
+
 function App() {
   const [sets, setSets] = useState<WorkoutSet[]>([])
   const [queue, setQueue] = useState<SyncQueueItem[]>([])
@@ -31,6 +56,7 @@ function App() {
   const [isOnline, setIsOnline] = useState(navigator.onLine)
   const [isSyncing, setIsSyncing] = useState(false)
   const [message, setMessage] = useState('')
+  const [activeSection, setActiveSection] = useState<MobileNavItemId>('today')
 
   async function refreshLocalState() {
     const [storedSets, pendingQueue] = await Promise.all([
@@ -250,9 +276,23 @@ function App() {
     }
   }
 
+  function handleMobileNavigation(item: MobileNavItemId) {
+    setActiveSection(item)
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+
   return (
-    <AppShell contentWidth="narrow">
-      <PageSection>
+    <AppShell
+      contentWidth="narrow"
+      mobileNavigation={
+        <MobileBottomNav
+          activeItem={activeSection}
+          onChange={handleMobileNavigation}
+        />
+      }
+    >
+      {activeSection === 'today' ? (
+        <PageSection>
         <div className="flex items-center justify-between gap-4">
           <p className="font-display text-sm font-bold uppercase tracking-[0.22em] text-gym-accent">
             GymBro
@@ -442,7 +482,34 @@ function App() {
             </Button>
           )}
         </Card>
-      </PageSection>
+        </PageSection>
+      ) : (
+        <PageSection>
+          <div className="flex items-center justify-between gap-4">
+            <p className="font-display text-sm font-bold uppercase tracking-[0.22em] text-gym-accent">
+              GymBro
+            </p>
+            <Badge tone={isOnline ? 'neutral' : 'warning'}>
+              {isOnline ? 'Online' : 'Sin conexión'}
+            </Badge>
+          </div>
+
+          <h1 className="font-display mt-2 text-5xl font-extrabold uppercase leading-[0.9] tracking-tight">
+            {sectionCopy[activeSection].title}
+          </h1>
+
+          <p className="mt-5 text-base leading-7 text-gym-muted">
+            {sectionCopy[activeSection].description}
+          </p>
+
+          <Card className="mt-6">
+            <StatePanel
+              title="Navegación móvil lista"
+              description="Esta pestaña ya funciona y conserva su estado activo. El contenido definitivo se incorporará en su punto correspondiente del checklist."
+            />
+          </Card>
+        </PageSection>
+      )}
     </AppShell>
   )
 }
