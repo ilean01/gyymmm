@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
+import { AppShell, PageSection } from './components/layout/AppShell'
 import {
   Badge,
   Button,
@@ -250,8 +251,8 @@ function App() {
   }
 
   return (
-    <main className="min-h-screen bg-gym-bg px-5 py-8 font-sans text-gym-text sm:px-6 sm:py-10">
-      <section className="mx-auto max-w-xl">
+    <AppShell contentWidth="narrow">
+      <PageSection>
         <div className="flex items-center justify-between gap-4">
           <p className="font-display text-sm font-bold uppercase tracking-[0.22em] text-gym-accent">
             GymBro
@@ -441,8 +442,8 @@ function App() {
             </Button>
           )}
         </Card>
-      </section>
-    </main>
+      </PageSection>
+    </AppShell>
   )
 }
 
