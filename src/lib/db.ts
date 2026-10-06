@@ -54,8 +54,10 @@ export function openGymBroDb(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
     const request = indexedDB.open(DB_NAME, DB_VERSION)
 
-    request.onupgradeneeded = () => {
+    request.onupgradeneeded = (event) => {
       const db = request.result
+      const upgradeTransaction = request.transaction
+      const oldVersion = event.oldVersion
 
       if (!db.objectStoreNames.contains(STORES.sessions)) {
         const sessions = db.createObjectStore(STORES.sessions, { keyPath: 'id' })
@@ -82,6 +84,45 @@ export function openGymBroDb(): Promise<IDBDatabase> {
         })
         syncQueue.createIndex('entityType', 'entityType')
         syncQueue.createIndex('createdAt', 'createdAt')
+      }
+
+      if (oldVersion < 2 && upgradeTransaction) {
+        const queueStore = upgradeTransaction.objectStore(STORES.syncQueue)
+
+        const migrateStore = (
+          storeName: typeof STORES.sets | typeof STORES.sessions,
+          entityType: SyncQueueItem['entityType'],
+        ) => {
+          const store = upgradeTransaction.objectStore(storeName)
+          const cursorRequest = store.openCursor()
+
+          cursorRequest.onsuccess = () => {
+            const cursor = cursorRequest.result
+
+            if (!cursor) {
+              return
+            }
+
+            const value = cursor.value as WorkoutSet | WorkoutSession
+
+            if (value.syncState !== 'synced') {
+              const pendingValue = {
+                ...value,
+                syncState: 'pending' as const,
+              }
+
+              cursor.update(pendingValue)
+              queueStore.put(
+                makeQueueItem(entityType, pendingValue.id, pendingValue),
+              )
+            }
+
+            cursor.continue()
+          }
+        }
+
+        migrateStore(STORES.sets, 'workoutSet')
+        migrateStore(STORES.sessions, 'workoutSession')
       }
     }
 
