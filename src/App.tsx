@@ -110,6 +110,55 @@ function App() {
     }
   }, [])
 
+  useEffect(() => {
+    let cancelled = false
+
+    const syncSilently = async () => {
+      if (
+        cancelled ||
+        !navigator.onLine ||
+        document.visibilityState !== 'visible'
+      ) {
+        return
+      }
+
+      try {
+        await syncPendingChanges()
+
+        if (!cancelled) {
+          await refreshLocalState()
+        }
+      } catch {
+        // La sincronización automática es silenciosa.
+        // Los cambios pendientes permanecen en IndexedDB para reintentar luego.
+      }
+    }
+
+    const handleVisible = () => {
+      if (document.visibilityState === 'visible') {
+        void syncSilently()
+      }
+    }
+
+    const handleFocus = () => {
+      void syncSilently()
+    }
+
+    const intervalId = window.setInterval(() => {
+      void syncSilently()
+    }, 10000)
+
+    document.addEventListener('visibilitychange', handleVisible)
+    window.addEventListener('focus', handleFocus)
+
+    return () => {
+      cancelled = true
+      window.clearInterval(intervalId)
+      document.removeEventListener('visibilitychange', handleVisible)
+      window.removeEventListener('focus', handleFocus)
+    }
+  }, [])
+
   async function ensureTestSession(now: string) {
     const existingSession = await getWorkoutSession('offline-test-session')
 
@@ -225,8 +274,8 @@ function App() {
               ? isSyncing
                 ? 'Sincronizando con Cloudflare…'
                 : queue.length > 0
-                  ? 'Hay Internet. GymBro reintentará estos cambios y después traerá la versión remota.'
-                  : 'La cola local está vacía. Podés sincronizar para buscar cambios de otros dispositivos.'
+                  ? 'Hay Internet. GymBro reintentará estos cambios automáticamente y después traerá la versión remota.'
+                  : 'Sincronización automática activa: GymBro busca cambios cada 10 segundos mientras está abierto.'
               : 'Podés seguir entrenando sin señal. La cola permanece guardada en IndexedDB.'}
           </p>
 
