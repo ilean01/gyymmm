@@ -1,16 +1,18 @@
 import type {
   GymBroSetting,
+  SyncQueueItem,
   WorkoutSession,
   WorkoutSet,
 } from '../types/training'
 
 const DB_NAME = 'gymbro-db'
-const DB_VERSION = 1
+const DB_VERSION = 2
 
 const STORES = {
   sessions: 'workoutSessions',
   sets: 'workoutSets',
   settings: 'settings',
+  syncQueue: 'syncQueue',
 } as const
 
 function requestToPromise<T>(request: IDBRequest<T>): Promise<T> {
@@ -26,6 +28,26 @@ function transactionDone(transaction: IDBTransaction): Promise<void> {
     transaction.onerror = () => reject(transaction.error)
     transaction.onabort = () => reject(transaction.error)
   })
+}
+
+function makeQueueItem<T>(
+  entityType: SyncQueueItem['entityType'],
+  entityId: string,
+  payload: T,
+): SyncQueueItem<T> {
+  const now = new Date().toISOString()
+
+  return {
+    id: `${entityType}:${entityId}`,
+    entityType,
+    entityId,
+    operation: 'upsert',
+    payload,
+    createdAt: now,
+    updatedAt: now,
+    attempts: 0,
+    lastError: null,
+  }
 }
 
 export function openGymBroDb(): Promise<IDBDatabase> {
@@ -53,12 +75,24 @@ export function openGymBroDb(): Promise<IDBDatabase> {
       if (!db.objectStoreNames.contains(STORES.settings)) {
         db.createObjectStore(STORES.settings, { keyPath: 'key' })
       }
+
+      if (!db.objectStoreNames.contains(STORES.syncQueue)) {
+        const syncQueue = db.createObjectStore(STORES.syncQueue, {
+          keyPath: 'id',
+        })
+        syncQueue.createIndex('entityType', 'entityType')
+        syncQueue.createIndex('createdAt', 'createdAt')
+      }
     }
 
     request.onsuccess = () => resolve(request.result)
     request.onerror = () => reject(request.error)
     request.onblocked = () =>
-      reject(new Error('GymBro no pudo abrir la base local porque hay otra versión abierta.'))
+      reject(
+        new Error(
+          'GymBro no pudo actualizar la base local porque hay otra versión abierta.',
+        ),
+      )
   })
 }
 
@@ -66,9 +100,27 @@ export async function saveWorkoutSession(
   session: WorkoutSession,
 ): Promise<void> {
   const db = await openGymBroDb()
+
   try {
-    const transaction = db.transaction(STORES.sessions, 'readwrite')
-    transaction.objectStore(STORES.sessions).put(session)
+    const pendingSession: WorkoutSession = {
+      ...session,
+      syncState: 'pending',
+      updatedAt: new Date().toISOString(),
+    }
+    const queueItem = makeQueueItem(
+      'workoutSession',
+      pendingSession.id,
+      pendingSession,
+    )
+
+    const transaction = db.transaction(
+      [STORES.sessions, STORES.syncQueue],
+      'readwrite',
+    )
+
+    transaction.objectStore(STORES.sessions).put(pendingSession)
+    transaction.objectStore(STORES.syncQueue).put(queueItem)
+
     await transactionDone(transaction)
   } finally {
     db.close()
@@ -77,9 +129,23 @@ export async function saveWorkoutSession(
 
 export async function saveWorkoutSet(set: WorkoutSet): Promise<void> {
   const db = await openGymBroDb()
+
   try {
-    const transaction = db.transaction(STORES.sets, 'readwrite')
-    transaction.objectStore(STORES.sets).put(set)
+    const pendingSet: WorkoutSet = {
+      ...set,
+      syncState: 'pending',
+      updatedAt: new Date().toISOString(),
+    }
+    const queueItem = makeQueueItem('workoutSet', pendingSet.id, pendingSet)
+
+    const transaction = db.transaction(
+      [STORES.sets, STORES.syncQueue],
+      'readwrite',
+    )
+
+    transaction.objectStore(STORES.sets).put(pendingSet)
+    transaction.objectStore(STORES.syncQueue).put(queueItem)
+
     await transactionDone(transaction)
   } finally {
     db.close()
@@ -88,6 +154,7 @@ export async function saveWorkoutSet(set: WorkoutSet): Promise<void> {
 
 export async function getWorkoutSets(): Promise<WorkoutSet[]> {
   const db = await openGymBroDb()
+
   try {
     const transaction = db.transaction(STORES.sets, 'readonly')
     const request = transaction.objectStore(STORES.sets).getAll()
@@ -103,11 +170,50 @@ export async function getWorkoutSets(): Promise<WorkoutSet[]> {
   }
 }
 
-export async function clearWorkoutSets(): Promise<void> {
+export async function getSyncQueue(): Promise<SyncQueueItem[]> {
   const db = await openGymBroDb()
+
   try {
-    const transaction = db.transaction(STORES.sets, 'readwrite')
+    const transaction = db.transaction(STORES.syncQueue, 'readonly')
+    const request = transaction.objectStore(STORES.syncQueue).getAll()
+    const queue = await requestToPromise(request)
+    await transactionDone(transaction)
+
+    return queue.sort(
+      (a, b) =>
+        new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
+    )
+  } finally {
+    db.close()
+  }
+}
+
+export async function getPendingSyncCount(): Promise<number> {
+  const db = await openGymBroDb()
+
+  try {
+    const transaction = db.transaction(STORES.syncQueue, 'readonly')
+    const request = transaction.objectStore(STORES.syncQueue).count()
+    const count = await requestToPromise(request)
+    await transactionDone(transaction)
+    return count
+  } finally {
+    db.close()
+  }
+}
+
+export async function clearWorkoutTestData(): Promise<void> {
+  const db = await openGymBroDb()
+
+  try {
+    const transaction = db.transaction(
+      [STORES.sets, STORES.syncQueue],
+      'readwrite',
+    )
+
     transaction.objectStore(STORES.sets).clear()
+    transaction.objectStore(STORES.syncQueue).clear()
+
     await transactionDone(transaction)
   } finally {
     db.close()
@@ -116,6 +222,7 @@ export async function clearWorkoutSets(): Promise<void> {
 
 export async function saveSetting<T>(key: string, value: T): Promise<void> {
   const db = await openGymBroDb()
+
   try {
     const transaction = db.transaction(STORES.settings, 'readwrite')
     const setting: GymBroSetting<T> = {
@@ -132,6 +239,7 @@ export async function saveSetting<T>(key: string, value: T): Promise<void> {
 
 export async function getSetting<T>(key: string): Promise<T | undefined> {
   const db = await openGymBroDb()
+
   try {
     const transaction = db.transaction(STORES.settings, 'readonly')
     const request = transaction.objectStore(STORES.settings).get(key)
