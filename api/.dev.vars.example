@@ -1,0 +1,5 @@
+# Copiá este archivo como .dev.vars cuando agreguemos secretos locales.
+# Nunca subas api/.dev.vars a GitHub.
+#
+# Ejemplo futuro:
+# JWT_SECRET=una-clave-local
