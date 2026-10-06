@@ -1,9 +1,16 @@
 {
-  "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "gymbro-api",
-  "main": "src/index.ts",
-  "compatibility_date": "2026-10-05",
-  "observability": {
-    "enabled": true
-  }
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "gymbro-api",
+	"main": "src/index.ts",
+	"compatibility_date": "2026-10-05",
+	"observability": {
+		"enabled": true
+	},
+	"d1_databases": [
+		{
+			"binding": "gymbro_db",
+			"database_name": "gymbro-db",
+			"database_id": "b31cc516-d0c0-468c-b277-78dc4cb607d6"
+		}
+	]
 }
