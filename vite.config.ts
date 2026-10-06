@@ -17,6 +17,7 @@ export default defineConfig({
         short_name: 'GymBro',
         description:
           'PWA personal para registrar entrenamientos, rutinas y progreso dentro y fuera del gimnasio.',
+        lang: 'es',
         start_url: '/gyymmm/',
         scope: '/gyymmm/',
         display: 'standalone',
