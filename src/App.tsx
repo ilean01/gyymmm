@@ -1,6 +1,13 @@
 import { useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
 import {
+  Badge,
+  Button,
+  Card,
+  NumberInput,
+  StatePanel,
+} from './components/ui'
+import {
   clearWorkoutTestData,
   getSyncQueue,
   getWorkoutSession,
@@ -37,7 +44,9 @@ function App() {
   async function handleSync(showMessage = true) {
     if (!navigator.onLine) {
       if (showMessage) {
-        setMessage('Sin Internet. Los cambios siguen guardados en este dispositivo.')
+        setMessage(
+          'Sin Internet. Los cambios siguen guardados en este dispositivo.',
+        )
       }
       return
     }
@@ -66,7 +75,9 @@ function App() {
       }
     } catch {
       if (showMessage) {
-        setMessage('No se pudo completar la sincronización. Los datos locales siguen seguros.')
+        setMessage(
+          'No se pudo completar la sincronización. Los datos locales siguen seguros.',
+        )
       }
       await refreshLocalState()
     } finally {
@@ -98,7 +109,9 @@ function App() {
 
     const handleOffline = () => {
       setIsOnline(false)
-      setMessage('Sin conexión. GymBro seguirá guardando los cambios localmente.')
+      setMessage(
+        'Sin conexión. GymBro seguirá guardando los cambios localmente.',
+      )
     }
 
     window.addEventListener('online', handleOnline)
@@ -244,15 +257,9 @@ function App() {
             GymBro
           </p>
 
-          <span
-            className={
-              isOnline
-                ? 'rounded-full border border-gym-border bg-gym-card px-3 py-1 text-xs font-semibold text-gym-muted'
-                : 'rounded-full border border-gym-warning/50 bg-gym-warning/10 px-3 py-1 text-xs font-semibold text-gym-warning'
-            }
-          >
+          <Badge tone={isOnline ? 'neutral' : 'warning'}>
             {isOnline ? 'Online' : 'Sin conexión'}
-          </span>
+          </Badge>
         </div>
 
         <h1 className="font-display mt-2 text-5xl font-extrabold uppercase leading-[0.9] tracking-tight">
@@ -267,7 +274,8 @@ function App() {
 
         <div className="mt-6 rounded-gym border border-gym-warning/40 bg-gym-warning/10 p-4">
           <p className="font-semibold text-gym-warning">
-            {queue.length} {queue.length === 1 ? 'cambio pendiente' : 'cambios pendientes'}
+            {queue.length}{' '}
+            {queue.length === 1 ? 'cambio pendiente' : 'cambios pendientes'}
           </p>
           <p className="mt-1 text-sm leading-6 text-gym-muted">
             {isOnline
@@ -280,14 +288,16 @@ function App() {
           </p>
 
           {isOnline && (
-            <button
+            <Button
               type="button"
+              variant="warning"
+              fullWidth
+              loading={isSyncing}
               onClick={() => void handleSync(true)}
-              disabled={isSyncing}
-              className="mt-3 min-h-11 w-full rounded-gym border border-gym-warning/40 px-4 py-2 font-semibold text-gym-warning disabled:opacity-50"
+              className="mt-3"
             >
-              {isSyncing ? 'Sincronizando…' : 'Sincronizar ahora'}
-            </button>
+              Sincronizar ahora
+            </Button>
           )}
         </div>
 
@@ -301,39 +311,25 @@ function App() {
           </h2>
 
           <div className="mt-5 grid grid-cols-2 gap-3">
-            <label className="text-sm font-medium text-gym-muted">
-              Peso (kg)
-              <input
-                inputMode="decimal"
-                type="number"
-                min="0"
-                step="0.5"
-                value={weight}
-                onChange={(event) => setWeight(event.target.value)}
-                className="mt-2 min-h-12 w-full rounded-gym border border-gym-border bg-gym-bg px-4 text-lg font-semibold text-gym-text"
-              />
-            </label>
+            <NumberInput
+              label="Peso (kg)"
+              decimal
+              min="0"
+              value={weight}
+              onChange={(event) => setWeight(event.target.value)}
+            />
 
-            <label className="text-sm font-medium text-gym-muted">
-              Repeticiones
-              <input
-                inputMode="numeric"
-                type="number"
-                min="1"
-                step="1"
-                value={reps}
-                onChange={(event) => setReps(event.target.value)}
-                className="mt-2 min-h-12 w-full rounded-gym border border-gym-border bg-gym-bg px-4 text-lg font-semibold text-gym-text"
-              />
-            </label>
+            <NumberInput
+              label="Repeticiones"
+              min="1"
+              value={reps}
+              onChange={(event) => setReps(event.target.value)}
+            />
           </div>
 
-          <button
-            type="submit"
-            className="mt-5 w-full rounded-gym bg-gym-accent px-6 py-3 font-semibold text-white transition hover:brightness-110 active:scale-[0.99]"
-          >
+          <Button type="submit" fullWidth className="mt-5">
             Guardar serie
-          </button>
+          </Button>
 
           {message && (
             <p className="mt-3 text-sm text-gym-muted" role="status">
@@ -342,10 +338,12 @@ function App() {
           )}
         </form>
 
-        <div className="mt-4 rounded-gym-lg border border-gym-border bg-gym-card p-5">
+        <Card className="mt-4">
           <div className="flex items-end justify-between gap-4">
             <div>
-              <p className="text-sm text-gym-muted">Guardadas en este dispositivo</p>
+              <p className="text-sm text-gym-muted">
+                Guardadas en este dispositivo
+              </p>
               <h2 className="font-display mt-1 text-3xl font-bold uppercase">
                 Series
               </h2>
@@ -356,9 +354,10 @@ function App() {
           </div>
 
           {sets.length === 0 ? (
-            <p className="mt-4 text-sm text-gym-muted">
-              Todavía no hay series guardadas en este dispositivo.
-            </p>
+            <StatePanel
+              title="Todavía no hay series"
+              description="Las series que guardes aparecerán acá y quedarán disponibles incluso sin conexión."
+            />
           ) : (
             <div className="mt-4 space-y-2">
               {sets.slice(0, 5).map((set) => (
@@ -369,7 +368,10 @@ function App() {
                   <div>
                     <p className="font-semibold">{set.exerciseName}</p>
                     <p className="text-xs text-gym-muted">
-                      Serie {set.setNumber} · {set.syncState === 'synced' ? 'sincronizada' : 'pendiente'}
+                      Serie {set.setNumber} ·{' '}
+                      {set.syncState === 'synced'
+                        ? 'sincronizada'
+                        : 'pendiente'}
                     </p>
                   </div>
                   <p className="font-display text-2xl font-bold">
@@ -379,9 +381,9 @@ function App() {
               ))}
             </div>
           )}
-        </div>
+        </Card>
 
-        <div className="mt-4 rounded-gym-lg border border-gym-border bg-gym-card p-5">
+        <Card className="mt-4">
           <div className="flex items-end justify-between gap-4">
             <div>
               <p className="text-sm text-gym-muted">Outbox local</p>
@@ -395,9 +397,10 @@ function App() {
           </div>
 
           {queue.length === 0 ? (
-            <p className="mt-4 text-sm text-gym-muted">
-              No hay cambios esperando sincronización.
-            </p>
+            <StatePanel
+              title="Todo sincronizado"
+              description="No hay cambios esperando sincronización."
+            />
           ) : (
             <div className="mt-4 space-y-2">
               {queue.slice(0, 5).map((item) => (
@@ -407,11 +410,11 @@ function App() {
                 >
                   <div className="flex items-center justify-between gap-3">
                     <p className="font-semibold">
-                      {item.entityType === 'workoutSet' ? 'Serie' : 'Entrenamiento'}
+                      {item.entityType === 'workoutSet'
+                        ? 'Serie'
+                        : 'Entrenamiento'}
                     </p>
-                    <span className="rounded-full border border-gym-warning/40 px-2 py-1 text-xs font-semibold text-gym-warning">
-                      Pendiente
-                    </span>
+                    <Badge tone="warning">Pendiente</Badge>
                   </div>
                   <p className="mt-1 break-all text-xs text-gym-muted">
                     {item.operation} · intento {item.attempts} · {item.entityId}
@@ -427,15 +430,17 @@ function App() {
           )}
 
           {(sets.length > 0 || queue.length > 0) && (
-            <button
+            <Button
               type="button"
+              variant="secondary"
+              fullWidth
               onClick={handleClear}
-              className="mt-4 min-h-11 w-full rounded-gym border border-gym-border px-4 py-2 font-semibold text-gym-muted transition hover:bg-gym-card-hover"
+              className="mt-4"
             >
               Borrar copia local de prueba
-            </button>
+            </Button>
           )}
-        </div>
+        </Card>
       </section>
     </main>
   )
