@@ -6,7 +6,7 @@ export type SyncState =
   | 'conflict'
   | 'error'
 
-export type SyncEntityType = 'workoutSession' | 'workoutSet' | 'exercise' | 'routine'
+export type SyncEntityType = 'workoutSession' | 'workoutSet' | 'exercise' | 'routine' | 'workoutExercise' | 'workoutPlanSet'
 export type SyncOperation = 'upsert' | 'delete'
 export type SyncQueueStatus =
   | 'pending'
