@@ -52,6 +52,7 @@ function makeQueueItem<T>(
   entityType: SyncQueueItem['entityType'],
   entityId: string,
   payload: T,
+  operation: SyncQueueItem['operation'] = 'upsert',
 ): SyncQueueItem<T> {
   const now = new Date().toISOString()
 
@@ -68,7 +69,7 @@ function makeQueueItem<T>(
     mutationId: crypto.randomUUID(),
     entityType,
     entityId,
-    operation: 'upsert',
+    operation,
     payload,
     baseRev: payloadRev,
     status: 'pending',
@@ -329,6 +330,24 @@ export async function saveWorkoutSession(
     transaction.objectStore(STORES.syncQueue).put(queueItem)
 
     await transactionDone(transaction)
+  } finally {
+    db.close()
+  }
+}
+
+export async function getWorkoutSessions(): Promise<WorkoutSession[]> {
+  const db = await openGymBroDb()
+
+  try {
+    const transaction = db.transaction(STORES.sessions, 'readonly')
+    const request = transaction.objectStore(STORES.sessions).getAll()
+    const sessions = (await requestToPromise(request)) as WorkoutSession[]
+    await transactionDone(transaction)
+
+    return sessions.sort(
+      (a, b) =>
+        new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime(),
+    )
   } finally {
     db.close()
   }
@@ -896,6 +915,70 @@ export async function applyRemoteSyncChanges(
 
     await transactionDone(transaction)
     return { sessions, sets }
+  } finally {
+    db.close()
+  }
+}
+
+
+export async function discardWorkoutSessionLocal(
+  sessionId: string,
+): Promise<void> {
+  const session = await getWorkoutSession(sessionId)
+
+  if (!session) {
+    return
+  }
+
+  const db = await openGymBroDb()
+
+  try {
+    const transaction = db.transaction(
+      [
+        STORES.sessions,
+        STORES.sets,
+        STORES.workoutExercises,
+        STORES.syncQueue,
+      ],
+      'readwrite',
+    )
+    const sessionsStore = transaction.objectStore(STORES.sessions)
+    const setsStore = transaction.objectStore(STORES.sets)
+    const workoutExercisesStore =
+      transaction.objectStore(STORES.workoutExercises)
+    const queueStore = transaction.objectStore(STORES.syncQueue)
+
+    sessionsStore.delete(sessionId)
+
+    const setsRequest = setsStore.index('sessionId').getAll(sessionId)
+    setsRequest.onsuccess = () => {
+      for (const set of setsRequest.result as Array<{ id: string }>) {
+        setsStore.delete(set.id)
+        queueStore.delete(`workoutPlanSet:${set.id}`)
+        queueStore.delete(`workoutSet:${set.id}`)
+      }
+    }
+
+    const exercisesRequest = workoutExercisesStore
+      .index('sessionId')
+      .getAll(sessionId)
+    exercisesRequest.onsuccess = () => {
+      for (const exercise of exercisesRequest.result as Array<{ id: string }>) {
+        workoutExercisesStore.delete(exercise.id)
+        queueStore.delete(`workoutExercise:${exercise.id}`)
+      }
+    }
+
+    queueStore.put(
+      makeQueueItem(
+        'workoutSession',
+        sessionId,
+        session,
+        'delete',
+      ),
+    )
+
+    await transactionDone(transaction)
   } finally {
     db.close()
   }
