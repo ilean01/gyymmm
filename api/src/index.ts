@@ -1041,9 +1041,11 @@ async function applySyncMutation(
         .bind(
           mutation.entityId,
           profileId,
+          payload.routineId ?? null,
           payload.routineName,
           payload.startedAt,
           payload.completedAt,
+          payload.abandonedAt ?? null,
           payload.status,
           payload.updatedAt,
           userId,
@@ -1863,6 +1865,145 @@ app.delete('/api/v1/routines/:id', requireAuth, async (c) => {
   return c.json({ ok: true, rev: nextRev })
 })
 
+app.get('/api/v1/workout-exercises', requireAuth, async (c) => {
+  const userId = c.get('userId')
+  const sessionId = c.req.query('sessionId')
+  const statement = sessionId
+    ? c.env.gymbro_db
+        .prepare(
+          `SELECT
+            we.id,
+            we.session_id,
+            we.source_routine_exercise_id,
+            we.exercise_id,
+            we.exercise_name,
+            we.position,
+            we.status,
+            we.notes,
+            we.rest_seconds,
+            we.replaced_exercise_id,
+            we.rev,
+            we.updated_at
+           FROM workout_exercises we
+           JOIN workout_sessions ws ON ws.id = we.session_id
+           WHERE ws.user_id = ?
+             AND ws.deleted_at IS NULL
+             AND we.session_id = ?
+           ORDER BY we.position`,
+        )
+        .bind(userId, sessionId)
+    : c.env.gymbro_db
+        .prepare(
+          `SELECT
+            we.id,
+            we.session_id,
+            we.source_routine_exercise_id,
+            we.exercise_id,
+            we.exercise_name,
+            we.position,
+            we.status,
+            we.notes,
+            we.rest_seconds,
+            we.replaced_exercise_id,
+            we.rev,
+            we.updated_at
+           FROM workout_exercises we
+           JOIN workout_sessions ws ON ws.id = we.session_id
+           WHERE ws.user_id = ?
+             AND ws.deleted_at IS NULL
+           ORDER BY we.session_id, we.position`,
+        )
+        .bind(userId)
+
+  const result = await statement.all<{
+    id: string
+    session_id: string
+    source_routine_exercise_id: string | null
+    exercise_id: string
+    exercise_name: string
+    position: number
+    status: 'pending' | 'active' | 'completed' | 'skipped'
+    notes: string | null
+    rest_seconds: number | null
+    replaced_exercise_id: string | null
+    rev: number
+    updated_at: string
+  }>()
+
+  return c.json({
+    ok: true,
+    exercises: (result.results ?? []).map((row) => ({
+      id: row.id,
+      sessionId: row.session_id,
+      sourceRoutineExerciseId: row.source_routine_exercise_id,
+      exerciseId: row.exercise_id,
+      exerciseName: row.exercise_name,
+      position: row.position,
+      status: row.status,
+      notes: row.notes,
+      restSeconds: row.rest_seconds,
+      replacedExerciseId: row.replaced_exercise_id,
+      rev: row.rev,
+      updatedAt: row.updated_at,
+    })),
+  })
+})
+
+app.get('/api/v1/workout-plan-sets', requireAuth, async (c) => {
+  const userId = c.get('userId')
+  const sessionId = c.req.query('sessionId')
+  const statement = sessionId
+    ? c.env.gymbro_db
+        .prepare(
+          `SELECT ws.*
+           FROM workout_sets ws
+           JOIN workout_sessions session ON session.id = ws.session_id
+           WHERE ws.user_id = ?
+             AND ws.deleted_at IS NULL
+             AND session.deleted_at IS NULL
+             AND ws.session_id = ?
+           ORDER BY ws.session_id, ws.workout_exercise_id, ws.set_number`,
+        )
+        .bind(userId, sessionId)
+    : c.env.gymbro_db
+        .prepare(
+          `SELECT ws.*
+           FROM workout_sets ws
+           JOIN workout_sessions session ON session.id = ws.session_id
+           WHERE ws.user_id = ?
+             AND ws.deleted_at IS NULL
+             AND session.deleted_at IS NULL
+           ORDER BY ws.session_id, ws.workout_exercise_id, ws.set_number`,
+        )
+        .bind(userId)
+
+  const result = await statement.all<WorkoutSetRow>()
+
+  return c.json({
+    ok: true,
+    sets: (result.results ?? [])
+      .filter((row) => row.workout_exercise_id !== null)
+      .map((row) => ({
+        id: row.id,
+        sessionId: row.session_id,
+        workoutExerciseId: row.workout_exercise_id as string,
+        exerciseId: row.exercise_id,
+        exerciseName: row.exercise_name,
+        setNumber: row.set_number,
+        targetWeightKg: row.target_weight_kg,
+        targetReps: row.target_reps,
+        targetSeconds: row.target_seconds,
+        actualWeightKg: row.weight_kg,
+        actualReps: row.reps,
+        durationSeconds: row.duration_seconds,
+        completedAt: row.completed_at,
+        isExtra: row.is_extra === 1,
+        rev: row.rev,
+        updatedAt: row.updated_at,
+      })),
+  })
+})
+
 app.put('/api/v1/workout-exercises/:id', requireAuth, async (c) => {
   const input = await c.req.json<unknown>().catch(() => null)
 
@@ -1901,15 +2042,71 @@ app.put('/api/v1/workout-exercises/:id', requireAuth, async (c) => {
 
   const existing = await c.env.gymbro_db
     .prepare(
-      `SELECT we.rev
+      `SELECT
+        we.id,
+        we.session_id,
+        we.source_routine_exercise_id,
+        we.exercise_id,
+        we.exercise_name,
+        we.position,
+        we.status,
+        we.notes,
+        we.rest_seconds,
+        we.replaced_exercise_id,
+        we.rev,
+        we.updated_at
        FROM workout_exercises we
        JOIN workout_sessions ws ON ws.id = we.session_id
        WHERE we.id = ? AND ws.user_id = ?`,
     )
     .bind(input.id, userId)
-    .first<{ rev: number }>()
+    .first<{
+      id: string
+      session_id: string
+      source_routine_exercise_id: string | null
+      exercise_id: string
+      exercise_name: string
+      position: number
+      status: 'pending' | 'active' | 'completed' | 'skipped'
+      notes: string | null
+      rest_seconds: number | null
+      replaced_exercise_id: string | null
+      rev: number
+      updated_at: string
+    }>()
 
-  const nextRev = existing ? existing.rev + 1 : 1
+  const baseRev = input.rev ?? 0
+
+  if ((existing?.rev ?? 0) !== baseRev) {
+    return c.json(
+      {
+        ok: false,
+        error: 'sync_conflict',
+        message: 'El ejercicio fue modificado en otro dispositivo.',
+        serverRev: existing?.rev ?? 0,
+        serverPayload: existing
+          ? {
+              id: existing.id,
+              sessionId: existing.session_id,
+              sourceRoutineExerciseId:
+                existing.source_routine_exercise_id,
+              exerciseId: existing.exercise_id,
+              exerciseName: existing.exercise_name,
+              position: existing.position,
+              status: existing.status,
+              notes: existing.notes,
+              restSeconds: existing.rest_seconds,
+              replacedExerciseId: existing.replaced_exercise_id,
+              rev: existing.rev,
+              updatedAt: existing.updated_at,
+            }
+          : null,
+      },
+      409,
+    )
+  }
+
+  const nextRev = baseRev + 1
   const now = new Date().toISOString()
 
   if (existing) {
@@ -2022,12 +2219,48 @@ app.put('/api/v1/workout-plan-sets/:id', requireAuth, async (c) => {
 
   const existing = await c.env.gymbro_db
     .prepare(
-      'SELECT rev FROM workout_sets WHERE id = ? AND user_id = ?',
+      `SELECT *
+       FROM workout_sets
+       WHERE id = ? AND user_id = ?`,
     )
     .bind(input.id, userId)
-    .first<{ rev: number }>()
+    .first<WorkoutSetRow>()
 
-  const nextRev = existing ? existing.rev + 1 : 1
+  const baseRev = input.rev ?? 0
+
+  if ((existing?.rev ?? 0) !== baseRev) {
+    return c.json(
+      {
+        ok: false,
+        error: 'sync_conflict',
+        message: 'La serie fue modificada en otro dispositivo.',
+        serverRev: existing?.rev ?? 0,
+        serverPayload: existing
+          ? {
+              id: existing.id,
+              sessionId: existing.session_id,
+              workoutExerciseId: existing.workout_exercise_id,
+              exerciseId: existing.exercise_id,
+              exerciseName: existing.exercise_name,
+              setNumber: existing.set_number,
+              targetWeightKg: existing.target_weight_kg,
+              targetReps: existing.target_reps,
+              targetSeconds: existing.target_seconds,
+              actualWeightKg: existing.weight_kg,
+              actualReps: existing.reps,
+              durationSeconds: existing.duration_seconds,
+              completedAt: existing.completed_at,
+              isExtra: existing.is_extra === 1,
+              rev: existing.rev,
+              updatedAt: existing.updated_at,
+            }
+          : null,
+      },
+      409,
+    )
+  }
+
+  const nextRev = baseRev + 1
   const now = new Date().toISOString()
 
   if (existing) {
@@ -2045,6 +2278,7 @@ app.put('/api/v1/workout-plan-sets/:id', requireAuth, async (c) => {
              weight_kg = ?,
              reps = ?,
              completed_at = ?,
+             is_extra = ?,
              rev = ?,
              updated_at = ?
          WHERE id = ? AND user_id = ?`,
@@ -2061,6 +2295,7 @@ app.put('/api/v1/workout-plan-sets/:id', requireAuth, async (c) => {
         input.actualWeightKg,
         input.actualReps,
         input.completedAt,
+        input.isExtra ? 1 : 0,
         nextRev,
         now,
         input.id,
@@ -2087,9 +2322,10 @@ app.put('/api/v1/workout-plan-sets/:id', requireAuth, async (c) => {
           target_reps,
           target_seconds,
           duration_seconds,
+          is_extra,
           rev,
           deleted_at
-        ) VALUES (?, 'default', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`,
+        ) VALUES (?, 'default', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`,
       )
       .bind(
         input.id,
@@ -2107,6 +2343,7 @@ app.put('/api/v1/workout-plan-sets/:id', requireAuth, async (c) => {
         input.targetReps,
         input.targetSeconds,
         input.durationSeconds,
+        input.isExtra ? 1 : 0,
         nextRev,
       )
       .run()
