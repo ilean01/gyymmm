@@ -1,11 +1,18 @@
-import { apiRequest } from './api'
+import { ApiError, apiRequest } from './api'
 import {
+  markDomainSyncConflict,
   markDomainSyncFailure,
   markDomainSyncSuccess,
   mergeRemoteExercises,
   mergeRemoteRoutines,
+  mergeRemoteWorkoutSnapshots,
 } from './domain-db'
-import type { Exercise, Routine } from '../types/domain'
+import type {
+  Exercise,
+  PlannedWorkoutSet,
+  Routine,
+  WorkoutExercise,
+} from '../types/domain'
 import type { SyncQueueItem } from '../types/training'
 
 export async function syncDomainOutbox(
@@ -23,6 +30,7 @@ export async function syncDomainOutbox(
 
   let synced = 0
   let failed = 0
+  let conflicts = 0
 
   for (const item of items) {
     try {
@@ -97,7 +105,7 @@ export async function syncDomainOutbox(
 
 export async function syncWorkoutSnapshotOutbox(
   queue: SyncQueueItem[],
-): Promise<{ synced: number; failed: number }> {
+): Promise<{ synced: number; failed: number; conflicts: number }> {
   const items = queue
     .filter(
       (item) =>
@@ -120,16 +128,38 @@ export async function syncWorkoutSnapshotOutbox(
           : `/api/v1/workout-plan-sets/${encodeURIComponent(item.entityId)}`
 
       const response = await apiRequest<{ ok: true; rev: number }>(
-        path,
-        {
-          method: 'PUT',
-          body: item.payload,
-        },
+        item.operation === 'delete'
+          ? `${path}?rev=${item.baseRev}`
+          : path,
+        item.operation === 'delete'
+          ? { method: 'DELETE' }
+          : {
+              method: 'PUT',
+              body: item.payload,
+            },
       )
 
       await markDomainSyncSuccess(item, response.rev)
       synced += 1
     } catch (error) {
+      if (
+        error instanceof ApiError &&
+        error.status === 409 &&
+        error.code === 'sync_conflict'
+      ) {
+        const serverRev =
+          typeof error.details?.serverRev === 'number'
+            ? error.details.serverRev
+            : item.baseRev
+        await markDomainSyncConflict(
+          item,
+          serverRev,
+          error.details?.serverPayload ?? null,
+        )
+        conflicts += 1
+        continue
+      }
+
       await markDomainSyncFailure(
         item,
         error instanceof Error
@@ -140,9 +170,35 @@ export async function syncWorkoutSnapshotOutbox(
     }
   }
 
-  return { synced, failed }
+  return { synced, failed, conflicts }
 }
 
+
+export async function pullWorkoutSnapshots(): Promise<{
+  exercises: number
+  sets: number
+}> {
+  const [exerciseResponse, setResponse] = await Promise.all([
+    apiRequest<{ ok: true; exercises: WorkoutExercise[] }>(
+      '/api/v1/workout-exercises',
+    ),
+    apiRequest<{ ok: true; sets: PlannedWorkoutSet[] }>(
+      '/api/v1/workout-plan-sets',
+    ),
+  ])
+
+  return mergeRemoteWorkoutSnapshots(
+    exerciseResponse.exercises.map((exercise) => ({
+      ...exercise,
+      syncState: 'synced',
+    })),
+    setResponse.sets.map((set) => ({
+      ...set,
+      isExtra: set.isExtra ?? false,
+      syncState: 'synced',
+    })),
+  )
+}
 
 export async function pullDomainCatalog(): Promise<{
   exercises: number
