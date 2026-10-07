@@ -99,10 +99,18 @@ function normalizeSession(
 ): WorkoutSession {
   return {
     id: String(data.id),
+    routineId:
+      data.routineId === undefined || data.routineId === null
+        ? null
+        : String(data.routineId),
     routineName: String(data.routineName),
     startedAt: String(data.startedAt),
     completedAt:
       data.completedAt === null ? null : String(data.completedAt),
+    abandonedAt:
+      data.abandonedAt === undefined || data.abandonedAt === null
+        ? null
+        : String(data.abandonedAt),
     status: data.status === 'completed' ? 'completed' : 'active',
     rev,
     syncState: 'synced',
