@@ -1,4 +1,5 @@
 import { Hono } from 'hono'
+import { createMiddleware } from 'hono/factory'
 import { cors } from 'hono/cors'
 import { validateLoginInput, validateRegisterInput } from './lib/auth'
 import { createUuid } from './lib/ids'
@@ -28,6 +29,16 @@ type D1DatabaseBinding = {
 type Bindings = {
   gymbro_db: D1DatabaseBinding
   JWT_SECRET: string
+}
+
+type Variables = {
+  userId: string
+  sessionId: string
+}
+
+type AppEnv = {
+  Bindings: Bindings
+  Variables: Variables
 }
 
 type WorkoutSessionInput = {
@@ -78,7 +89,7 @@ type WorkoutSetRow = {
   created_at: string
 }
 
-const app = new Hono<{ Bindings: Bindings }>()
+const app = new Hono<AppEnv>()
 
 app.use(
   '/api/*',
@@ -93,6 +104,78 @@ app.use(
     maxAge: 86400,
   }),
 )
+
+const requireAuth = createMiddleware<AppEnv>(async (c, next) => {
+  const authorization = c.req.header('Authorization')
+  const [scheme, token] = authorization?.split(' ') ?? []
+
+  if (scheme !== 'Bearer' || !token) {
+    return c.json(
+      {
+        ok: false,
+        error: 'unauthorized',
+        message: 'Necesitás iniciar sesión.',
+      },
+      401,
+    )
+  }
+
+  const verified = await verifyJwt(c.env.JWT_SECRET, token)
+
+  if (!verified.ok) {
+    return c.json(
+      {
+        ok: false,
+        error: 'unauthorized',
+        message: 'La sesión no es válida o venció.',
+      },
+      401,
+    )
+  }
+
+  const session = await c.env.gymbro_db
+    .prepare(
+      `SELECT
+        id,
+        user_id,
+        expires_at,
+        revoked_at
+      FROM auth_sessions
+      WHERE id = ?
+        AND user_id = ?`,
+    )
+    .bind(
+      verified.payload.sid,
+      verified.payload.sub,
+    )
+    .first<{
+      id: string
+      user_id: string
+      expires_at: string
+      revoked_at: string | null
+    }>()
+
+  const sessionExpired =
+    !session ||
+    !Number.isFinite(Date.parse(session.expires_at)) ||
+    Date.parse(session.expires_at) <= Date.now()
+
+  if (!session || session.revoked_at !== null || sessionExpired) {
+    return c.json(
+      {
+        ok: false,
+        error: 'unauthorized',
+        message: 'La sesión no es válida o fue cerrada.',
+      },
+      401,
+    )
+  }
+
+  c.set('userId', verified.payload.sub)
+  c.set('sessionId', verified.payload.sid)
+
+  await next()
+})
 
 function isNonEmptyString(value: unknown): value is string {
   return typeof value === 'string' && value.trim().length > 0
@@ -517,6 +600,65 @@ app.post('/api/v1/auth/logout', async (c) => {
   return c.json({
     ok: true,
     message: 'Sesión cerrada correctamente.',
+  })
+})
+
+app.get('/api/v1/auth/me', requireAuth, async (c) => {
+  const userId = c.get('userId')
+
+  const user = await c.env.gymbro_db
+    .prepare(
+      `SELECT id, email
+       FROM users
+       WHERE id = ?`,
+    )
+    .bind(userId)
+    .first<{
+      id: string
+      email: string
+    }>()
+
+  if (!user) {
+    return c.json(
+      {
+        ok: false,
+        error: 'unauthorized',
+        message: 'La cuenta asociada a la sesión ya no existe.',
+      },
+      401,
+    )
+  }
+
+  const profile = await c.env.gymbro_db
+    .prepare(
+      `SELECT
+        user_id,
+        display_name,
+        timezone
+      FROM user_profiles
+      WHERE user_id = ?`,
+    )
+    .bind(userId)
+    .first<{
+      user_id: string
+      display_name: string | null
+      timezone: string
+    }>()
+
+  return c.json({
+    ok: true,
+    user: {
+      id: user.id,
+      email: user.email,
+    },
+    profile: profile
+      ? {
+          userId: profile.user_id,
+          displayName: profile.display_name,
+          timezone: profile.timezone,
+        }
+      : null,
+    sessionId: c.get('sessionId'),
   })
 })
 
