@@ -1,5 +1,10 @@
 import type { ReactNode } from 'react'
+import { useEffect, useState } from 'react'
 import { Navigate, useLocation } from 'react-router-dom'
+import {
+  getAuthSession,
+  subscribeToAuthChanges,
+} from '../lib/auth-session'
 
 interface ProtectedRouteProps {
   children: ReactNode
@@ -8,9 +13,15 @@ interface ProtectedRouteProps {
 export function ProtectedRoute({ children }: ProtectedRouteProps) {
   const location = useLocation()
   const authRequired = import.meta.env.VITE_AUTH_REQUIRED === 'true'
-  const token = localStorage.getItem('gymbro:access-token')
+  const [session, setSession] = useState(() => getAuthSession())
 
-  if (authRequired && !token) {
+  useEffect(() => {
+    return subscribeToAuthChanges(() => {
+      setSession(getAuthSession())
+    })
+  }, [])
+
+  if (authRequired && !session) {
     return (
       <Navigate
         to="/login"
