@@ -2,7 +2,7 @@ import { Hono } from 'hono'
 import { cors } from 'hono/cors'
 import { validateLoginInput, validateRegisterInput } from './lib/auth'
 import { createUuid } from './lib/ids'
-import { JWT_DEFAULT_TTL_SECONDS, signJwt } from './lib/jwt'
+import { JWT_DEFAULT_TTL_SECONDS, signJwt, verifyJwt } from './lib/jwt'
 import { hashPassword, verifyPassword } from './lib/passwords'
 
 type D1RunResult = {
@@ -467,6 +467,56 @@ app.post('/api/v1/auth/login', async (c) => {
           timezone: profile.timezone,
         }
       : null,
+  })
+})
+
+app.post('/api/v1/auth/logout', async (c) => {
+  const authorization = c.req.header('Authorization')
+  const [scheme, token] = authorization?.split(' ') ?? []
+
+  if (scheme !== 'Bearer' || !token) {
+    return c.json(
+      {
+        ok: false,
+        error: 'invalid_token',
+        message: 'La sesión no es válida.',
+      },
+      401,
+    )
+  }
+
+  const verified = await verifyJwt(c.env.JWT_SECRET, token)
+
+  if (!verified.ok) {
+    return c.json(
+      {
+        ok: false,
+        error: 'invalid_token',
+        message: 'La sesión no es válida.',
+      },
+      401,
+    )
+  }
+
+  const now = new Date().toISOString()
+
+  await c.env.gymbro_db
+    .prepare(
+      `UPDATE auth_sessions
+       SET revoked_at = COALESCE(revoked_at, ?)
+       WHERE id = ?
+         AND user_id = ?`,
+    )
+    .bind(
+      now,
+      verified.payload.sid,
+      verified.payload.sub,
+    )
+    .run()
+
+  return c.json({
+    ok: true,
+    message: 'Sesión cerrada correctamente.',
   })
 })
 
