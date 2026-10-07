@@ -507,3 +507,84 @@ export async function getPlannedWorkoutSets(
     db.close()
   }
 }
+
+
+export async function mergeRemoteExercises(
+  remoteExercises: Exercise[],
+): Promise<number> {
+  const db = await openGymBroDb()
+
+  try {
+    const transaction = db.transaction(
+      [STORES.exercises, STORES.syncQueue],
+      'readwrite',
+    )
+    const exerciseStore = transaction.objectStore(STORES.exercises)
+    const queueStore = transaction.objectStore(STORES.syncQueue)
+    const queueRequest = queueStore.getAll()
+    let merged = 0
+
+    queueRequest.onsuccess = () => {
+      const pending = new Set(
+        (queueRequest.result as SyncQueueItem[]).map((item) => item.id),
+      )
+
+      for (const exercise of remoteExercises) {
+        if (pending.has(`exercise:${exercise.id}`)) {
+          continue
+        }
+
+        exerciseStore.put({
+          ...exercise,
+          syncState: 'synced',
+        })
+        merged += 1
+      }
+    }
+
+    await transactionDone(transaction)
+    return merged
+  } finally {
+    db.close()
+  }
+}
+
+export async function mergeRemoteRoutines(
+  remoteRoutines: Routine[],
+): Promise<number> {
+  const db = await openGymBroDb()
+
+  try {
+    const transaction = db.transaction(
+      [STORES.routines, STORES.syncQueue],
+      'readwrite',
+    )
+    const routineStore = transaction.objectStore(STORES.routines)
+    const queueStore = transaction.objectStore(STORES.syncQueue)
+    const queueRequest = queueStore.getAll()
+    let merged = 0
+
+    queueRequest.onsuccess = () => {
+      const pending = new Set(
+        (queueRequest.result as SyncQueueItem[]).map((item) => item.id),
+      )
+
+      for (const routine of remoteRoutines) {
+        if (pending.has(`routine:${routine.id}`)) {
+          continue
+        }
+
+        routineStore.put({
+          ...routine,
+          syncState: 'synced',
+        })
+        merged += 1
+      }
+    }
+
+    await transactionDone(transaction)
+    return merged
+  } finally {
+    db.close()
+  }
+}
