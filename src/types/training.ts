@@ -6,7 +6,7 @@ export type SyncState =
   | 'conflict'
   | 'error'
 
-export type SyncEntityType = 'workoutSession' | 'workoutSet'
+export type SyncEntityType = 'workoutSession' | 'workoutSet' | 'exercise' | 'routine'
 export type SyncOperation = 'upsert' | 'delete'
 export type SyncQueueStatus =
   | 'pending'
@@ -16,6 +16,7 @@ export type SyncQueueStatus =
 
 export interface WorkoutSession {
   id: string
+  routineId?: string | null
   routineName: string
   startedAt: string
   completedAt: string | null
