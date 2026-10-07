@@ -1,7 +1,9 @@
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
+import { validateRegisterInput } from './lib/auth'
 import { createUuid } from './lib/ids'
-import { signJwt, verifyJwt } from './lib/jwt'
+import { JWT_DEFAULT_TTL_SECONDS, signJwt } from './lib/jwt'
+import { hashPassword } from './lib/passwords'
 
 type D1RunResult = {
   success?: boolean
@@ -20,6 +22,7 @@ type D1Statement = {
 
 type D1DatabaseBinding = {
   prepare(query: string): D1Statement
+  batch(statements: D1Statement[]): Promise<D1RunResult[]>
 }
 
 type Bindings = {
@@ -187,6 +190,154 @@ app.get('/health', (c) =>
     timestamp: new Date().toISOString(),
   }),
 )
+
+app.post('/api/v1/auth/register', async (c) => {
+  const input = await c.req.json<unknown>().catch(() => null)
+  const validation = validateRegisterInput(input)
+
+  if (!validation.ok) {
+    return c.json(
+      {
+        ok: false,
+        error: 'invalid_registration',
+        message: validation.message,
+      },
+      400,
+    )
+  }
+
+  const { email, password, displayName } = validation.value
+
+  const existingUser = await c.env.gymbro_db
+    .prepare('SELECT id FROM users WHERE email = ? COLLATE NOCASE')
+    .bind(email)
+    .first<{ id: string }>()
+
+  if (existingUser) {
+    return c.json(
+      {
+        ok: false,
+        error: 'email_in_use',
+        message: 'Ya existe una cuenta con ese email.',
+      },
+      409,
+    )
+  }
+
+  const userId = createUuid()
+  const sessionId = createUuid()
+  const passwordData = await hashPassword(password)
+  const now = new Date()
+  const expiresAt = new Date(
+    now.getTime() + JWT_DEFAULT_TTL_SECONDS * 1000,
+  ).toISOString()
+
+  const statements = [
+    c.env.gymbro_db
+      .prepare(
+        `INSERT INTO users (
+          id,
+          email,
+          password_hash,
+          password_salt,
+          password_iterations,
+          created_at,
+          updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .bind(
+        userId,
+        email,
+        passwordData.hash,
+        passwordData.salt,
+        passwordData.iterations,
+        now.toISOString(),
+        now.toISOString(),
+      ),
+    c.env.gymbro_db
+      .prepare(
+        `INSERT INTO user_profiles (
+          user_id,
+          display_name,
+          timezone,
+          rev,
+          created_at,
+          updated_at
+        ) VALUES (?, ?, ?, 1, ?, ?)`,
+      )
+      .bind(
+        userId,
+        displayName ?? null,
+        'America/Asuncion',
+        now.toISOString(),
+        now.toISOString(),
+      ),
+    c.env.gymbro_db
+      .prepare(
+        `INSERT INTO auth_sessions (
+          id,
+          user_id,
+          created_at,
+          expires_at,
+          revoked_at
+        ) VALUES (?, ?, ?, ?, NULL)`,
+      )
+      .bind(
+        sessionId,
+        userId,
+        now.toISOString(),
+        expiresAt,
+      ),
+  ]
+
+  try {
+    await c.env.gymbro_db.batch(statements)
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : String(error)
+
+    if (
+      message.includes('UNIQUE constraint failed: users.email') ||
+      message.includes('users.email')
+    ) {
+      return c.json(
+        {
+          ok: false,
+          error: 'email_in_use',
+          message: 'Ya existe una cuenta con ese email.',
+        },
+        409,
+      )
+    }
+
+    throw error
+  }
+
+  const accessToken = await signJwt(c.env.JWT_SECRET, {
+    sub: userId,
+    sid: sessionId,
+    expiresInSeconds: JWT_DEFAULT_TTL_SECONDS,
+  })
+
+  return c.json(
+    {
+      ok: true,
+      accessToken,
+      tokenType: 'Bearer',
+      expiresIn: JWT_DEFAULT_TTL_SECONDS,
+      user: {
+        id: userId,
+        email,
+      },
+      profile: {
+        userId,
+        displayName: displayName ?? null,
+        timezone: 'America/Asuncion',
+      },
+    },
+    201,
+  )
+})
 
 app.get('/api/v1/sync/status', async (c) => {
   const workoutSessions = await c.env.gymbro_db
@@ -417,82 +568,6 @@ app.get('/api/v1/workout-sets', async (c) => {
   return c.json({
     ok: true,
     sets: (result.results ?? []).map(setRowToApi),
-  })
-})
-
-app.get('/api/v1/dev/jwt-selftest', async (c) => {
-  const hostname = new URL(c.req.url).hostname
-
-  if (hostname !== 'localhost' && hostname !== '127.0.0.1') {
-    return c.json(
-      {
-        ok: false,
-        error: 'not_found',
-        message: 'La ruta solicitada no existe en GymBro API.',
-      },
-      404,
-    )
-  }
-
-  const userId = createUuid()
-  const sessionId = createUuid()
-
-  const token = await signJwt(c.env.JWT_SECRET, {
-    sub: userId,
-    sid: sessionId,
-    expiresInSeconds: 300,
-  })
-
-  const validResult = await verifyJwt(c.env.JWT_SECRET, token)
-
-  const tokenParts = token.split('.')
-  const tamperedToken = `${tokenParts[0]}.${tokenParts[1]}.${tokenParts[2].slice(0, -1)}A`
-  const tamperedResult = await verifyJwt(
-    c.env.JWT_SECRET,
-    tamperedToken,
-  )
-
-  const expiredToken = await signJwt(c.env.JWT_SECRET, {
-    sub: userId,
-    sid: sessionId,
-    issuedAtSeconds: 1,
-    expiresInSeconds: 1,
-  })
-  const expiredResult = await verifyJwt(
-    c.env.JWT_SECRET,
-    expiredToken,
-    3,
-  )
-
-  const claimsValid =
-    validResult.ok &&
-    validResult.payload.sub === userId &&
-    validResult.payload.sid === sessionId &&
-    validResult.payload.exp > validResult.payload.iat
-
-  const tamperedRejected =
-    !tamperedResult.ok &&
-    tamperedResult.reason === 'invalid_signature'
-
-  const expiredRejected =
-    !expiredResult.ok &&
-    expiredResult.reason === 'expired'
-
-  return c.json({
-    ok: claimsValid && tamperedRejected && expiredRejected,
-    checks: {
-      claimsValid,
-      tamperedRejected,
-      expiredRejected,
-    },
-    claims: validResult.ok
-      ? {
-          sub: validResult.payload.sub,
-          sid: validResult.payload.sid,
-          iat: validResult.payload.iat,
-          exp: validResult.payload.exp,
-        }
-      : null,
   })
 })
 
