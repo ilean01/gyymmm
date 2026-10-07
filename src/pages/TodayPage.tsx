@@ -11,11 +11,14 @@ import {
 import {
   clearWorkoutTestData,
   getSyncQueue,
+  getSetting,
   getWorkoutSession,
   getWorkoutSets,
+  saveSetting,
   saveWorkoutSession,
   saveWorkoutSet,
 } from '../lib/db'
+import { createUuid, isUuid } from '../lib/ids'
 import { syncPendingChanges } from '../lib/sync'
 import type {
   SyncQueueItem,
@@ -172,15 +175,20 @@ export function TodayPage() {
     }
   }, [])
 
-  async function ensureTestSession(now: string) {
-    const existingSession = await getWorkoutSession('offline-test-session')
+  async function ensureTestSession(now: string): Promise<string> {
+    const storedSessionId = await getSetting<string>('testWorkoutSessionId')
 
-    if (existingSession) {
-      return
+    if (isUuid(storedSessionId)) {
+      const existingSession = await getWorkoutSession(storedSessionId)
+
+      if (existingSession) {
+        return storedSessionId
+      }
     }
 
+    const sessionId = createUuid()
     const session: WorkoutSession = {
-      id: 'offline-test-session',
+      id: sessionId,
       routineName: 'Rutina offline de prueba',
       startedAt: now,
       completedAt: null,
@@ -190,6 +198,9 @@ export function TodayPage() {
     }
 
     await saveWorkoutSession(session)
+    await saveSetting('testWorkoutSessionId', sessionId)
+
+    return sessionId
   }
 
   async function handleSave(event: FormEvent<HTMLFormElement>) {
@@ -211,8 +222,8 @@ export function TodayPage() {
     const now = new Date().toISOString()
 
     const workoutSet: WorkoutSet = {
-      id: crypto.randomUUID(),
-      sessionId: 'offline-test-session',
+      id: createUuid(),
+      sessionId: '',
       exerciseId: 'hip-thrust',
       exerciseName: 'Hip Thrust',
       setNumber: sets.length + 1,
@@ -224,8 +235,12 @@ export function TodayPage() {
     }
 
     try {
-      await ensureTestSession(now)
-      await saveWorkoutSet(workoutSet)
+      const sessionId = await ensureTestSession(now)
+
+      await saveWorkoutSet({
+        ...workoutSet,
+        sessionId,
+      })
       await refreshLocalState()
 
       if (navigator.onLine) {
