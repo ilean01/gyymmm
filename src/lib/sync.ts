@@ -2,6 +2,7 @@ import { ApiError, apiRequest } from './api'
 import { getAuthSession } from './auth-session'
 import {
   pullDomainCatalog,
+  pullWorkoutSnapshots,
   syncDomainOutbox,
   syncWorkoutSnapshotOutbox,
 } from './domain-sync'
@@ -309,10 +310,12 @@ async function runSync(): Promise<SyncSummary> {
     const snapshots = await syncWorkoutSnapshotOutbox(queue)
     summary.synced += snapshots.synced
     summary.failed += snapshots.failed
+    summary.conflicts += snapshots.conflicts
 
     await pullDomainCatalog()
 
     const pulled = await pullRemoteChanges()
+    await pullWorkoutSnapshots()
     summary.downloadedSessions = pulled.downloadedSessions
     summary.downloadedSets = pulled.downloadedSets
 
