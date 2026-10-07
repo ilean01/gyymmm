@@ -67,3 +67,23 @@ export interface WorkoutExercise {
   syncState: SyncState
   updatedAt: string
 }
+
+
+export interface PlannedWorkoutSet {
+  id: string
+  sessionId: string
+  workoutExerciseId: string
+  exerciseId: string
+  exerciseName: string
+  setNumber: number
+  targetWeightKg: number | null
+  targetReps: number | null
+  targetSeconds: number | null
+  actualWeightKg: number | null
+  actualReps: number | null
+  durationSeconds: number | null
+  completedAt: string | null
+  rev: number
+  syncState: SyncState
+  updatedAt: string
+}
