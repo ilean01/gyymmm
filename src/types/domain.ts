@@ -83,6 +83,7 @@ export interface PlannedWorkoutSet {
   actualReps: number | null
   durationSeconds: number | null
   completedAt: string | null
+  isExtra: boolean
   rev: number
   syncState: SyncState
   updatedAt: string
@@ -98,4 +99,43 @@ export interface RestTimerState {
   pausedRemainingSeconds: number | null
   startedAt: string
   updatedAt: string
+}
+
+
+export interface ExerciseLastPerformance {
+  sessionId: string
+  completedAt: string
+  sets: Array<{
+    setNumber: number
+    weightKg: number | null
+    reps: number | null
+    durationSeconds: number | null
+  }>
+}
+
+export interface ProgressiveOverloadSuggestion {
+  kind: 'weight' | 'reps' | 'time' | 'maintain'
+  message: string
+}
+
+export interface WorkoutPersonalRecord {
+  exerciseId: string
+  exerciseName: string
+  kind: 'weight'
+  previousValue: number
+  newValue: number
+}
+
+export interface WorkoutSummary {
+  sessionId: string
+  routineName: string
+  startedAt: string
+  completedAt: string
+  abandoned: boolean
+  durationSeconds: number
+  completedExercises: number
+  skippedExercises: number
+  completedSets: number
+  volumeKg: number
+  personalRecords: WorkoutPersonalRecord[]
 }
