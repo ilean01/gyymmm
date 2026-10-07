@@ -1,13 +1,16 @@
 import { getAuthSession } from './auth-session'
+import type { AuthProfile, AuthUser } from '../types/auth'
 import type {
   GymBroSetting,
+  SyncConflict,
+  SyncMetadata,
   SyncQueueItem,
   WorkoutSession,
   WorkoutSet,
 } from '../types/training'
 
 const LEGACY_DB_NAME = 'gymbro-db'
-const DB_VERSION = 3
+const DB_VERSION = 4
 
 function currentDatabaseName(): string {
   const userId = getAuthSession()?.user.id
@@ -22,6 +25,8 @@ const STORES = {
   sets: 'workoutSets',
   settings: 'settings',
   syncQueue: 'syncQueue',
+  profiles: 'profiles',
+  conflicts: 'syncConflicts',
 } as const
 
 function requestToPromise<T>(request: IDBRequest<T>): Promise<T> {
@@ -46,12 +51,23 @@ function makeQueueItem<T>(
 ): SyncQueueItem<T> {
   const now = new Date().toISOString()
 
+  const payloadRev =
+    typeof payload === 'object' &&
+    payload !== null &&
+    'rev' in payload &&
+    typeof (payload as { rev?: unknown }).rev === 'number'
+      ? (payload as { rev: number }).rev
+      : 0
+
   return {
     id: `${entityType}:${entityId}`,
+    mutationId: crypto.randomUUID(),
     entityType,
     entityId,
     operation: 'upsert',
     payload,
+    baseRev: payloadRev,
+    status: 'pending',
     createdAt: now,
     updatedAt: now,
     attempts: 0,
@@ -95,6 +111,18 @@ export function openGymBroDb(): Promise<IDBDatabase> {
         syncQueue.createIndex('createdAt', 'createdAt')
       }
 
+      if (!db.objectStoreNames.contains(STORES.profiles)) {
+        db.createObjectStore(STORES.profiles, { keyPath: 'userId' })
+      }
+
+      if (!db.objectStoreNames.contains(STORES.conflicts)) {
+        const conflicts = db.createObjectStore(STORES.conflicts, {
+          keyPath: 'id',
+        })
+        conflicts.createIndex('entityType', 'entityType')
+        conflicts.createIndex('createdAt', 'createdAt')
+      }
+
       if (oldVersion < 2 && upgradeTransaction) {
         const queueStore = upgradeTransaction.objectStore(STORES.syncQueue)
 
@@ -132,6 +160,65 @@ export function openGymBroDb(): Promise<IDBDatabase> {
 
         migrateStore(STORES.sets, 'workoutSet')
         migrateStore(STORES.sessions, 'workoutSession')
+      }
+
+
+      if (oldVersion < 4 && upgradeTransaction) {
+        const upgradeEntityStore = (
+          storeName: typeof STORES.sessions | typeof STORES.sets,
+        ) => {
+          const store = upgradeTransaction.objectStore(storeName)
+          const cursorRequest = store.openCursor()
+
+          cursorRequest.onsuccess = () => {
+            const cursor = cursorRequest.result
+
+            if (!cursor) {
+              return
+            }
+
+            const value = cursor.value as Record<string, unknown>
+
+            if (typeof value.rev !== 'number') {
+              cursor.update({
+                ...value,
+                rev: value.syncState === 'synced' ? 1 : 0,
+              })
+            }
+
+            cursor.continue()
+          }
+        }
+
+        upgradeEntityStore(STORES.sessions)
+        upgradeEntityStore(STORES.sets)
+
+        const queueStore = upgradeTransaction.objectStore(STORES.syncQueue)
+        const queueCursorRequest = queueStore.openCursor()
+
+        queueCursorRequest.onsuccess = () => {
+          const cursor = queueCursorRequest.result
+
+          if (!cursor) {
+            return
+          }
+
+          const value = cursor.value as Partial<SyncQueueItem> & {
+            payload?: { rev?: number }
+          }
+
+          cursor.update({
+            ...value,
+            mutationId: value.mutationId ?? crypto.randomUUID(),
+            baseRev:
+              typeof value.baseRev === 'number'
+                ? value.baseRev
+                : value.payload?.rev ?? 0,
+            status: value.status ?? 'pending',
+          })
+
+          cursor.continue()
+        }
       }
 
       if (oldVersion < 3 && upgradeTransaction) {
