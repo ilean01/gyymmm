@@ -318,6 +318,359 @@ function isSyncMutation(value: unknown): value is SyncMutationInput {
   )
 }
 
+
+type SyncMutationResult =
+  | {
+      mutationId: string
+      status: 'applied'
+      entityType: SyncEntityType
+      entityId: string
+      resultingRev: number
+    }
+  | {
+      mutationId: string
+      status: 'conflict'
+      entityType: SyncEntityType
+      entityId: string
+      serverRev: number
+      serverPayload: ReturnType<typeof sessionRowToApi> | ReturnType<typeof setRowToApi> | null
+    }
+  | {
+      mutationId: string
+      status: 'error'
+      entityType: SyncEntityType
+      entityId: string
+      message: string
+    }
+
+async function applySyncMutation(
+  db: D1DatabaseBinding,
+  userId: string,
+  mutation: SyncMutationInput,
+): Promise<SyncMutationResult> {
+  const alreadyProcessed = await db
+    .prepare(
+      `SELECT user_id, resulting_rev
+       FROM processed_mutations
+       WHERE mutation_id = ?`,
+    )
+    .bind(mutation.mutationId)
+    .first<{
+      user_id: string
+      resulting_rev: number | null
+    }>()
+
+  if (alreadyProcessed) {
+    if (alreadyProcessed.user_id !== userId) {
+      return {
+        mutationId: mutation.mutationId,
+        status: 'error',
+        entityType: mutation.entityType,
+        entityId: mutation.entityId,
+        message: 'La mutación no pertenece a este usuario.',
+      }
+    }
+
+    return {
+      mutationId: mutation.mutationId,
+      status: 'applied',
+      entityType: mutation.entityType,
+      entityId: mutation.entityId,
+      resultingRev: alreadyProcessed.resulting_rev ?? mutation.baseRev,
+    }
+  }
+
+  const isSession = mutation.entityType === 'workoutSession'
+  const table = isSession ? 'workout_sessions' : 'workout_sets'
+
+  const owner = await db
+    .prepare(`SELECT user_id FROM ${table} WHERE id = ?`)
+    .bind(mutation.entityId)
+    .first<{ user_id: string | null }>()
+
+  if (owner && owner.user_id !== userId) {
+    return {
+      mutationId: mutation.mutationId,
+      status: 'error',
+      entityType: mutation.entityType,
+      entityId: mutation.entityId,
+      message: 'El registro solicitado no existe.',
+    }
+  }
+
+  const existing = isSession
+    ? await db
+        .prepare(
+          `SELECT *
+           FROM workout_sessions
+           WHERE id = ? AND user_id = ?`,
+        )
+        .bind(mutation.entityId, userId)
+        .first<WorkoutSessionRow>()
+    : await db
+        .prepare(
+          `SELECT *
+           FROM workout_sets
+           WHERE id = ? AND user_id = ?`,
+        )
+        .bind(mutation.entityId, userId)
+        .first<WorkoutSetRow>()
+
+  const currentRev = existing?.rev ?? 0
+
+  if (currentRev !== mutation.baseRev) {
+    return {
+      mutationId: mutation.mutationId,
+      status: 'conflict',
+      entityType: mutation.entityType,
+      entityId: mutation.entityId,
+      serverRev: currentRev,
+      serverPayload: existing
+        ? isSession
+          ? sessionRowToApi(existing as WorkoutSessionRow)
+          : setRowToApi(existing as WorkoutSetRow)
+        : null,
+    }
+  }
+
+  const resultingRev = currentRev + 1
+  const now = new Date().toISOString()
+  let entityStatement: D1Statement
+
+  if (mutation.operation === 'delete') {
+    if (!existing) {
+      return {
+        mutationId: mutation.mutationId,
+        status: 'applied',
+        entityType: mutation.entityType,
+        entityId: mutation.entityId,
+        resultingRev: mutation.baseRev,
+      }
+    }
+
+    entityStatement = db
+      .prepare(
+        `UPDATE ${table}
+         SET deleted_at = ?,
+             updated_at = ?,
+             rev = ?
+         WHERE id = ?
+           AND user_id = ?
+           AND rev = ?`,
+      )
+      .bind(
+        now,
+        now,
+        resultingRev,
+        mutation.entityId,
+        userId,
+        mutation.baseRev,
+      )
+  } else if (isSession) {
+    const payload = mutation.payload as WorkoutSessionInput
+    const profileId = payload.profileId ?? 'default'
+
+    if (existing) {
+      entityStatement = db
+        .prepare(
+          `UPDATE workout_sessions
+           SET profile_id = ?,
+               routine_name = ?,
+               started_at = ?,
+               completed_at = ?,
+               status = ?,
+               updated_at = ?,
+               deleted_at = NULL,
+               rev = ?
+           WHERE id = ?
+             AND user_id = ?
+             AND rev = ?`,
+        )
+        .bind(
+          profileId,
+          payload.routineName,
+          payload.startedAt,
+          payload.completedAt,
+          payload.status,
+          payload.updatedAt,
+          resultingRev,
+          mutation.entityId,
+          userId,
+          mutation.baseRev,
+        )
+    } else {
+      entityStatement = db
+        .prepare(
+          `INSERT INTO workout_sessions (
+            id,
+            profile_id,
+            routine_name,
+            started_at,
+            completed_at,
+            status,
+            updated_at,
+            user_id,
+            rev,
+            deleted_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`,
+        )
+        .bind(
+          mutation.entityId,
+          profileId,
+          payload.routineName,
+          payload.startedAt,
+          payload.completedAt,
+          payload.status,
+          payload.updatedAt,
+          userId,
+          resultingRev,
+        )
+    }
+  } else {
+    const payload = mutation.payload as WorkoutSetInput
+    const profileId = payload.profileId ?? 'default'
+
+    const parentSession = await db
+      .prepare(
+        `SELECT id
+         FROM workout_sessions
+         WHERE id = ?
+           AND user_id = ?
+           AND deleted_at IS NULL`,
+      )
+      .bind(payload.sessionId, userId)
+      .first<{ id: string }>()
+
+    if (!parentSession) {
+      return {
+        mutationId: mutation.mutationId,
+        status: 'error',
+        entityType: mutation.entityType,
+        entityId: mutation.entityId,
+        message:
+          'La sesión asociada no existe o todavía no fue sincronizada.',
+      }
+    }
+
+    if (existing) {
+      entityStatement = db
+        .prepare(
+          `UPDATE workout_sets
+           SET profile_id = ?,
+               session_id = ?,
+               exercise_id = ?,
+               exercise_name = ?,
+               set_number = ?,
+               weight_kg = ?,
+               reps = ?,
+               completed_at = ?,
+               updated_at = ?,
+               deleted_at = NULL,
+               rev = ?
+           WHERE id = ?
+             AND user_id = ?
+             AND rev = ?`,
+        )
+        .bind(
+          profileId,
+          payload.sessionId,
+          payload.exerciseId,
+          payload.exerciseName,
+          payload.setNumber,
+          payload.weightKg,
+          payload.reps,
+          payload.completedAt,
+          payload.updatedAt,
+          resultingRev,
+          mutation.entityId,
+          userId,
+          mutation.baseRev,
+        )
+    } else {
+      entityStatement = db
+        .prepare(
+          `INSERT INTO workout_sets (
+            id,
+            profile_id,
+            session_id,
+            exercise_id,
+            exercise_name,
+            set_number,
+            weight_kg,
+            reps,
+            completed_at,
+            updated_at,
+            user_id,
+            rev,
+            deleted_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`,
+        )
+        .bind(
+          mutation.entityId,
+          profileId,
+          payload.sessionId,
+          payload.exerciseId,
+          payload.exerciseName,
+          payload.setNumber,
+          payload.weightKg,
+          payload.reps,
+          payload.completedAt,
+          payload.updatedAt,
+          userId,
+          resultingRev,
+        )
+    }
+  }
+
+  await db.batch([
+    entityStatement,
+    db
+      .prepare(
+        `INSERT INTO processed_mutations (
+          mutation_id,
+          user_id,
+          entity_type,
+          entity_id,
+          operation,
+          resulting_rev
+        ) VALUES (?, ?, ?, ?, ?, ?)`,
+      )
+      .bind(
+        mutation.mutationId,
+        userId,
+        mutation.entityType,
+        mutation.entityId,
+        mutation.operation,
+        resultingRev,
+      ),
+    db
+      .prepare(
+        `INSERT INTO sync_changes (
+          user_id,
+          entity_type,
+          entity_id,
+          operation,
+          rev
+        ) VALUES (?, ?, ?, ?, ?)`,
+      )
+      .bind(
+        userId,
+        mutation.entityType,
+        mutation.entityId,
+        mutation.operation,
+        resultingRev,
+      ),
+  ])
+
+  return {
+    mutationId: mutation.mutationId,
+    status: 'applied',
+    entityType: mutation.entityType,
+    entityId: mutation.entityId,
+    resultingRev,
+  }
+}
+
 app.get('/', (c) =>
   c.json({
     name: 'GymBro API',
