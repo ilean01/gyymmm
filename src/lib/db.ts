@@ -1,3 +1,4 @@
+import { getAuthSession } from './auth-session'
 import type {
   GymBroSetting,
   SyncQueueItem,
@@ -5,8 +6,16 @@ import type {
   WorkoutSet,
 } from '../types/training'
 
-const DB_NAME = 'gymbro-db'
+const LEGACY_DB_NAME = 'gymbro-db'
 const DB_VERSION = 3
+
+function currentDatabaseName(): string {
+  const userId = getAuthSession()?.user.id
+
+  return userId
+    ? `${LEGACY_DB_NAME}:${userId}`
+    : LEGACY_DB_NAME
+}
 
 const STORES = {
   sessions: 'workoutSessions',
@@ -52,7 +61,7 @@ function makeQueueItem<T>(
 
 export function openGymBroDb(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
-    const request = indexedDB.open(DB_NAME, DB_VERSION)
+    const request = indexedDB.open(currentDatabaseName(), DB_VERSION)
 
     request.onupgradeneeded = (event) => {
       const db = request.result
