@@ -10,6 +10,7 @@ import {
 } from '../components/ui'
 import {
   clearWorkoutTestData,
+  getSyncConflicts,
   getSyncQueue,
   getSetting,
   getWorkoutSession,
@@ -22,6 +23,7 @@ import { getAuthSession } from '../lib/auth-session'
 import { createUuid, isUuid } from '../lib/ids'
 import { syncPendingChanges } from '../lib/sync'
 import type {
+  SyncConflict,
   SyncQueueItem,
   WorkoutSession,
   WorkoutSet,
@@ -30,6 +32,7 @@ import type {
 export function TodayPage() {
   const [sets, setSets] = useState<WorkoutSet[]>([])
   const [queue, setQueue] = useState<SyncQueueItem[]>([])
+  const [conflicts, setConflicts] = useState<SyncConflict[]>([])
   const [weight, setWeight] = useState('20')
   const [reps, setReps] = useState('10')
   const [isOnline, setIsOnline] = useState(navigator.onLine)
@@ -38,13 +41,15 @@ export function TodayPage() {
   const hasSession = Boolean(getAuthSession())
 
   async function refreshLocalState() {
-    const [storedSets, pendingQueue] = await Promise.all([
+    const [storedSets, pendingQueue, storedConflicts] = await Promise.all([
       getWorkoutSets(),
       getSyncQueue(),
+      getSyncConflicts(),
     ])
 
     setSets(storedSets)
     setQueue(pendingQueue)
+    setConflicts(storedConflicts)
   }
 
   async function handleSync(showMessage = true) {
@@ -67,7 +72,11 @@ export function TodayPage() {
         const downloaded =
           summary.downloadedSessions + summary.downloadedSets
 
-        if (summary.failed > 0) {
+        if (summary.conflicts > 0) {
+          setMessage(
+            `Sincronización detenida por ${summary.conflicts} conflicto(s). Tus datos locales no fueron sobrescritos.`,
+          )
+        } else if (summary.failed > 0) {
           setMessage(
             `Subidos: ${summary.synced} · descargados: ${downloaded} · ${summary.failed} quedaron pendientes.`,
           )
@@ -191,6 +200,7 @@ export function TodayPage() {
     const sessionId = createUuid()
     const session: WorkoutSession = {
       id: sessionId,
+      rev: 0,
       routineName: 'Rutina offline de prueba',
       startedAt: now,
       completedAt: null,
@@ -225,6 +235,7 @@ export function TodayPage() {
 
     const workoutSet: WorkoutSet = {
       id: createUuid(),
+      rev: 0,
       sessionId: '',
       exerciseId: 'hip-thrust',
       exerciseName: 'Hip Thrust',
@@ -401,6 +412,27 @@ export function TodayPage() {
           </div>
         )}
       </Card>
+
+      {conflicts.length > 0 && (
+        <Card className="mt-4 border-gym-warning/50">
+          <div className="flex items-end justify-between gap-4">
+            <div>
+              <p className="text-sm text-gym-muted">Sincronización</p>
+              <h2 className="font-display mt-1 text-3xl font-bold uppercase">
+                Conflictos
+              </h2>
+            </div>
+            <p className="font-display text-4xl font-bold text-gym-warning">
+              {conflicts.length}
+            </p>
+          </div>
+
+          <StatePanel
+            title="Hay cambios para revisar"
+            description="GymBro conservó tu versión local y no sobrescribió nada. La resolución manual se agregará sobre este registro de conflicto."
+          />
+        </Card>
+      )}
 
       <Card className="mt-4">
         <div className="flex items-end justify-between gap-4">
