@@ -14,11 +14,12 @@ import {
 } from './components/navigation/MobileBottomNav'
 import { LoginPage } from './pages/LoginPage'
 import { RegisterPage } from './pages/RegisterPage'
-import {
-  DynamicPlaceholderPage,
-  PlaceholderPage,
-} from './pages/PlaceholderPage'
+import { PlaceholderPage } from './pages/PlaceholderPage'
+import { ExercisesPage } from './pages/ExercisesPage'
+import { RoutineEditorPage } from './pages/RoutineEditorPage'
+import { RoutinesPage } from './pages/RoutinesPage'
 import { TodayPage } from './pages/TodayPage'
+import { WorkoutBootstrapPage } from './pages/WorkoutBootstrapPage'
 import { ProtectedRoute } from './router/ProtectedRoute'
 
 const navPaths: Record<MobileNavItemId, string> = {
@@ -90,49 +91,10 @@ function App() {
       >
         <Route index element={<TodayPage />} />
 
-        <Route
-          path="/routines"
-          element={
-            <PlaceholderPage
-              title="Rutinas"
-              description="Acá vas a crear, editar y organizar tus rutinas."
-            />
-          }
-        />
-
-        <Route
-          path="/routines/:id"
-          element={
-            <DynamicPlaceholderPage
-              title="Detalle de rutina"
-              description="Esta ruta queda reservada para ver y editar una rutina específica."
-              paramName="id"
-              entityLabel="Rutina"
-            />
-          }
-        />
-
-        <Route
-          path="/workout/:id"
-          element={
-            <DynamicPlaceholderPage
-              title="Entrenamiento"
-              description="Esta ruta alojará una sesión de entrenamiento activa o histórica."
-              paramName="id"
-              entityLabel="Entrenamiento"
-            />
-          }
-        />
-
-        <Route
-          path="/exercises"
-          element={
-            <PlaceholderPage
-              title="Ejercicios"
-              description="Biblioteca general y ejercicios personalizados."
-            />
-          }
-        />
+        <Route path="/routines" element={<RoutinesPage />} />
+        <Route path="/routines/:id" element={<RoutineEditorPage />} />
+        <Route path="/workout/:id" element={<WorkoutBootstrapPage />} />
+        <Route path="/exercises" element={<ExercisesPage />} />
 
         <Route
           path="/progress"
