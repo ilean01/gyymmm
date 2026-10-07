@@ -1105,6 +1105,244 @@ app.get('/api/v1/sync/status', async (c) => {
   })
 })
 
+app.post('/api/v1/sync/push', requireAuth, async (c) => {
+  const body = await c.req.json<unknown>().catch(() => null)
+
+  if (
+    !body ||
+    typeof body !== 'object' ||
+    !Array.isArray((body as { mutations?: unknown }).mutations)
+  ) {
+    return c.json(
+      {
+        ok: false,
+        error: 'invalid_sync_batch',
+        message: 'El lote de sincronización no es válido.',
+      },
+      400,
+    )
+  }
+
+  const rawMutations = (body as { mutations: unknown[] }).mutations
+
+  if (rawMutations.length > 50) {
+    return c.json(
+      {
+        ok: false,
+        error: 'sync_batch_too_large',
+        message: 'Enviá como máximo 50 cambios por lote.',
+      },
+      400,
+    )
+  }
+
+  if (!rawMutations.every(isSyncMutation)) {
+    return c.json(
+      {
+        ok: false,
+        error: 'invalid_sync_mutation',
+        message: 'Una o más mutaciones no son válidas.',
+      },
+      400,
+    )
+  }
+
+  const userId = c.get('userId')
+  const ordered = [...rawMutations].sort((left, right) => {
+    if (left.entityType === right.entityType) {
+      return 0
+    }
+
+    return left.entityType === 'workoutSession' ? -1 : 1
+  })
+  const results: SyncMutationResult[] = []
+
+  for (const mutation of ordered) {
+    try {
+      results.push(
+        await applySyncMutation(c.env.gymbro_db, userId, mutation),
+      )
+    } catch (error) {
+      results.push({
+        mutationId: mutation.mutationId,
+        status: 'error',
+        entityType: mutation.entityType,
+        entityId: mutation.entityId,
+        message:
+          error instanceof Error
+            ? error.message
+            : 'No se pudo aplicar la mutación.',
+      })
+    }
+  }
+
+  return c.json({
+    ok: true,
+    results,
+  })
+})
+
+app.get('/api/v1/sync/pull', requireAuth, async (c) => {
+  const rawCursor = c.req.query('cursor') ?? '0'
+  const cursor = Number(rawCursor)
+
+  if (!Number.isInteger(cursor) || cursor < 0) {
+    return c.json(
+      {
+        ok: false,
+        error: 'invalid_cursor',
+        message: 'El cursor de sincronización no es válido.',
+      },
+      400,
+    )
+  }
+
+  const userId = c.get('userId')
+  const maxRow = await c.env.gymbro_db
+    .prepare(
+      `SELECT COALESCE(MAX(seq), 0) AS max_seq
+       FROM sync_changes
+       WHERE user_id = ?`,
+    )
+    .bind(userId)
+    .first<{ max_seq: number }>()
+
+  const maxCursor = maxRow?.max_seq ?? 0
+
+  if (cursor === 0) {
+    const [sessionsResult, setsResult] = await Promise.all([
+      c.env.gymbro_db
+        .prepare(
+          `SELECT *
+           FROM workout_sessions
+           WHERE user_id = ?
+             AND deleted_at IS NULL
+           ORDER BY updated_at ASC`,
+        )
+        .bind(userId)
+        .all<WorkoutSessionRow>(),
+      c.env.gymbro_db
+        .prepare(
+          `SELECT *
+           FROM workout_sets
+           WHERE user_id = ?
+             AND deleted_at IS NULL
+           ORDER BY updated_at ASC`,
+        )
+        .bind(userId)
+        .all<WorkoutSetRow>(),
+    ])
+
+    return c.json({
+      ok: true,
+      bootstrap: true,
+      cursor: maxCursor,
+      hasMore: false,
+      changes: [
+        ...(sessionsResult.results ?? []).map((row) => ({
+          seq: 0,
+          entityType: 'workoutSession' as const,
+          entityId: row.id,
+          operation: 'upsert' as const,
+          rev: row.rev,
+          data: sessionRowToApi(row),
+        })),
+        ...(setsResult.results ?? []).map((row) => ({
+          seq: 0,
+          entityType: 'workoutSet' as const,
+          entityId: row.id,
+          operation: 'upsert' as const,
+          rev: row.rev,
+          data: setRowToApi(row),
+        })),
+      ],
+    })
+  }
+
+  const changesResult = await c.env.gymbro_db
+    .prepare(
+      `SELECT
+        seq,
+        entity_type,
+        entity_id,
+        operation,
+        rev,
+        changed_at
+       FROM sync_changes
+       WHERE user_id = ?
+         AND seq > ?
+       ORDER BY seq ASC
+       LIMIT 200`,
+    )
+    .bind(userId, cursor)
+    .all<{
+      seq: number
+      entity_type: SyncEntityType
+      entity_id: string
+      operation: SyncOperation
+      rev: number
+      changed_at: string
+    }>()
+
+  const changes = []
+
+  for (const change of changesResult.results ?? []) {
+    let data:
+      | ReturnType<typeof sessionRowToApi>
+      | ReturnType<typeof setRowToApi>
+      | null = null
+
+    if (change.operation === 'upsert') {
+      if (change.entity_type === 'workoutSession') {
+        const row = await c.env.gymbro_db
+          .prepare(
+            `SELECT *
+             FROM workout_sessions
+             WHERE id = ? AND user_id = ?`,
+          )
+          .bind(change.entity_id, userId)
+          .first<WorkoutSessionRow>()
+
+        data = row ? sessionRowToApi(row) : null
+      } else {
+        const row = await c.env.gymbro_db
+          .prepare(
+            `SELECT *
+             FROM workout_sets
+             WHERE id = ? AND user_id = ?`,
+          )
+          .bind(change.entity_id, userId)
+          .first<WorkoutSetRow>()
+
+        data = row ? setRowToApi(row) : null
+      }
+    }
+
+    changes.push({
+      seq: change.seq,
+      entityType: change.entity_type,
+      entityId: change.entity_id,
+      operation: change.operation,
+      rev: change.rev,
+      changedAt: change.changed_at,
+      data,
+    })
+  }
+
+  const nextCursor =
+    changes.length > 0
+      ? changes[changes.length - 1].seq
+      : cursor
+
+  return c.json({
+    ok: true,
+    bootstrap: false,
+    cursor: nextCursor,
+    hasMore: nextCursor < maxCursor,
+    changes,
+  })
+})
+
 app.put('/api/v1/workout-sessions/:id', requireAuth, async (c) => {
   const input = await c.req.json<unknown>().catch(() => null)
 
