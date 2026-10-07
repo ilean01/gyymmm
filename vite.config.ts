@@ -52,9 +52,63 @@ export default defineConfig({
         ],
       },
       workbox: {
-        globPatterns: ['**/*.{js,css,html,svg,png,woff,woff2}'],
+        globPatterns: ['**/*.{js,css,html,svg,png,webp,jpg,jpeg,woff,woff2}'],
         cleanupOutdatedCaches: true,
+        clientsClaim: true,
+        skipWaiting: true,
         navigateFallback: 'index.html',
+        navigateFallbackAllowlist: [/^\/gyymmm\//],
+        runtimeCaching: [
+          {
+            urlPattern: ({ request, url }) =>
+              url.origin === self.location.origin &&
+              request.destination === 'image',
+            handler: 'CacheFirst',
+            options: {
+              cacheName: 'gymbro-images-v1',
+              expiration: {
+                maxEntries: 80,
+                maxAgeSeconds: 60 * 60 * 24 * 30,
+              },
+              cacheableResponse: {
+                statuses: [0, 200],
+              },
+            },
+          },
+          {
+            urlPattern: ({ request, url }) =>
+              url.origin === self.location.origin &&
+              request.destination === 'font',
+            handler: 'CacheFirst',
+            options: {
+              cacheName: 'gymbro-fonts-v1',
+              expiration: {
+                maxEntries: 40,
+                maxAgeSeconds: 60 * 60 * 24 * 365,
+              },
+              cacheableResponse: {
+                statuses: [0, 200],
+              },
+            },
+          },
+          {
+            urlPattern: ({ request, url }) =>
+              url.origin === self.location.origin &&
+              (request.destination === 'style' ||
+                request.destination === 'script'),
+            handler: 'StaleWhileRevalidate',
+            options: {
+              cacheName: 'gymbro-static-v1',
+              expiration: {
+                maxEntries: 60,
+                maxAgeSeconds: 60 * 60 * 24 * 7,
+              },
+              cacheableResponse: {
+                statuses: [0, 200],
+              },
+            },
+          },
+        ],
       },
     }),
   ],
