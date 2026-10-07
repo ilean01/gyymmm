@@ -1180,3 +1180,82 @@ export async function removeExtraWorkoutSet(
     db.close()
   }
 }
+
+
+export async function markDomainSyncConflict(
+  item: SyncQueueItem,
+  serverRev: number,
+  serverPayload: unknown,
+): Promise<void> {
+  const storeName =
+    item.entityType === 'exercise'
+      ? STORES.exercises
+      : item.entityType === 'routine'
+        ? STORES.routines
+        : item.entityType === 'workoutExercise'
+          ? STORES.workoutExercises
+          : item.entityType === 'workoutPlanSet'
+            ? STORES.workoutSets
+            : null
+
+  if (!storeName) return
+
+  const db = await openGymBroDb()
+
+  try {
+    const transaction = db.transaction(
+      [storeName, STORES.syncQueue, 'syncConflicts'],
+      'readwrite',
+    )
+    const store = transaction.objectStore(storeName)
+    const queueStore = transaction.objectStore(STORES.syncQueue)
+    const conflictsStore = transaction.objectStore('syncConflicts')
+    const queueRequest = queueStore.get(item.id)
+
+    queueRequest.onsuccess = () => {
+      const current = queueRequest.result as SyncQueueItem | undefined
+
+      if (!current || current.mutationId !== item.mutationId) return
+
+      queueStore.put({
+        ...current,
+        status: 'conflict',
+        lastError: 'El servidor tiene una versión más nueva.',
+        updatedAt: new Date().toISOString(),
+      })
+
+      const entityRequest = store.get(item.entityId)
+      entityRequest.onsuccess = () => {
+        const entity = entityRequest.result as
+          | Exercise
+          | Routine
+          | WorkoutExercise
+          | PlannedWorkoutSet
+          | undefined
+
+        if (entity) {
+          store.put({
+            ...entity,
+            syncState: 'conflict',
+          })
+        }
+      }
+
+      conflictsStore.put({
+        id: `${item.entityType}:${item.entityId}`,
+        entityType: item.entityType,
+        entityId: item.entityId,
+        mutationId: item.mutationId,
+        localPayload: item.payload,
+        serverPayload,
+        baseRev: item.baseRev,
+        serverRev,
+        createdAt: new Date().toISOString(),
+      })
+    }
+
+    await transactionDone(transaction)
+  } finally {
+    db.close()
+  }
+}
