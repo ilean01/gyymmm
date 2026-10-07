@@ -77,3 +77,14 @@ export interface GymBroSetting<T = unknown> {
   value: T
   updatedAt: string
 }
+
+
+export interface SyncRemoteChange {
+  seq: number
+  entityType: SyncEntityType
+  entityId: string
+  operation: SyncOperation
+  rev: number
+  changedAt?: string
+  data: WorkoutSession | WorkoutSet | null
+}
