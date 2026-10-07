@@ -12,7 +12,8 @@ import {
   MobileBottomNav,
   type MobileNavItemId,
 } from './components/navigation/MobileBottomNav'
-import { AuthPlaceholderPage } from './pages/AuthPlaceholderPage'
+import { LoginPage } from './pages/LoginPage'
+import { RegisterPage } from './pages/RegisterPage'
 import {
   DynamicPlaceholderPage,
   PlaceholderPage,
@@ -77,14 +78,8 @@ function PrivateAppLayout() {
 function App() {
   return (
     <Routes>
-      <Route
-        path="/login"
-        element={<AuthPlaceholderPage mode="login" />}
-      />
-      <Route
-        path="/register"
-        element={<AuthPlaceholderPage mode="register" />}
-      />
+      <Route path="/login" element={<LoginPage />} />
+      <Route path="/register" element={<RegisterPage />} />
 
       <Route
         element={
