@@ -20,6 +20,7 @@ import { RoutineEditorPage } from './pages/RoutineEditorPage'
 import { RoutinesPage } from './pages/RoutinesPage'
 import { TodayPage } from './pages/TodayPage'
 import { WorkoutBootstrapPage } from './pages/WorkoutBootstrapPage'
+import { WorkoutSummaryPage } from './pages/WorkoutSummaryPage'
 import { ProtectedRoute } from './router/ProtectedRoute'
 
 const navPaths: Record<MobileNavItemId, string> = {
@@ -94,6 +95,7 @@ function App() {
         <Route path="/routines" element={<RoutinesPage />} />
         <Route path="/routines/:id" element={<RoutineEditorPage />} />
         <Route path="/workout/:id" element={<WorkoutBootstrapPage />} />
+        <Route path="/workout/:id/summary" element={<WorkoutSummaryPage />} />
         <Route path="/exercises" element={<ExercisesPage />} />
 
         <Route
