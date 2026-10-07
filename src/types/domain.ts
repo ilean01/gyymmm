@@ -87,3 +87,15 @@ export interface PlannedWorkoutSet {
   syncState: SyncState
   updatedAt: string
 }
+
+
+export interface RestTimerState {
+  sessionId: string
+  workoutExerciseId: string
+  status: 'running' | 'paused'
+  durationSeconds: number
+  endsAt: string | null
+  pausedRemainingSeconds: number | null
+  startedAt: string
+  updatedAt: string
+}
