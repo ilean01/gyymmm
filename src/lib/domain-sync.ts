@@ -91,3 +91,52 @@ export async function syncDomainOutbox(
 
   return { synced, failed }
 }
+
+
+export async function syncWorkoutSnapshotOutbox(
+  queue: SyncQueueItem[],
+): Promise<{ synced: number; failed: number }> {
+  const items = queue
+    .filter(
+      (item) =>
+        item.entityType === 'workoutExercise' ||
+        item.entityType === 'workoutPlanSet',
+    )
+    .sort((a, b) => {
+      if (a.entityType === b.entityType) return 0
+      return a.entityType === 'workoutExercise' ? -1 : 1
+    })
+
+  let synced = 0
+  let failed = 0
+
+  for (const item of items) {
+    try {
+      const path =
+        item.entityType === 'workoutExercise'
+          ? `/api/v1/workout-exercises/${encodeURIComponent(item.entityId)}`
+          : `/api/v1/workout-plan-sets/${encodeURIComponent(item.entityId)}`
+
+      const response = await apiRequest<{ ok: true; rev: number }>(
+        path,
+        {
+          method: 'PUT',
+          body: item.payload,
+        },
+      )
+
+      await markDomainSyncSuccess(item, response.rev)
+      synced += 1
+    } catch (error) {
+      await markDomainSyncFailure(
+        item,
+        error instanceof Error
+          ? error.message
+          : 'No se pudo sincronizar el snapshot del entrenamiento.',
+      )
+      failed += 1
+    }
+  }
+
+  return { synced, failed }
+}
