@@ -72,6 +72,7 @@ export async function seedOfflineDomainData(): Promise<void> {
     return
   }
 
+  const seeded = await getSetting<boolean>('initialRoutineSeeded')
   const db = await openGymBroDb()
 
   try {
@@ -86,8 +87,6 @@ export async function seedOfflineDomainData(): Promise<void> {
     for (const exercise of BUILTIN_EXERCISES) {
       exerciseStore.put(exercise)
     }
-
-    const seeded = await getSetting<boolean>('initialRoutineSeeded')
 
     if (!seeded) {
       const routine = createInitialRoutine()
