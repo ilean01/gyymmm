@@ -2,6 +2,8 @@ import { apiRequest } from './api'
 import {
   markDomainSyncFailure,
   markDomainSyncSuccess,
+  mergeRemoteExercises,
+  mergeRemoteRoutines,
 } from './domain-db'
 import type { Exercise, Routine } from '../types/domain'
 import type { SyncQueueItem } from '../types/training'
@@ -139,4 +141,32 @@ export async function syncWorkoutSnapshotOutbox(
   }
 
   return { synced, failed }
+}
+
+
+export async function pullDomainCatalog(): Promise<{
+  exercises: number
+  routines: number
+}> {
+  const [exerciseResponse, routineResponse] = await Promise.all([
+    apiRequest<{ ok: true; exercises: Exercise[] }>('/api/v1/exercises'),
+    apiRequest<{ ok: true; routines: Routine[] }>('/api/v1/routines'),
+  ])
+
+  const [exercises, routines] = await Promise.all([
+    mergeRemoteExercises(
+      exerciseResponse.exercises.map((exercise) => ({
+        ...exercise,
+        syncState: 'synced',
+      })),
+    ),
+    mergeRemoteRoutines(
+      routineResponse.routines.map((routine) => ({
+        ...routine,
+        syncState: 'synced',
+      })),
+    ),
+  ])
+
+  return { exercises, routines }
 }
