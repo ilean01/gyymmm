@@ -16,10 +16,8 @@ interface WakeLockSentinelLike {
   ): void
 }
 
-interface WakeLockNavigator extends Navigator {
-  wakeLock?: {
-    request(type: 'screen'): Promise<WakeLockSentinelLike>
-  }
+type WakeLockApiLike = {
+  request(type: 'screen'): Promise<WakeLockSentinelLike>
 }
 
 export function useWorkoutWakeLock(enabled: boolean) {
@@ -31,9 +29,11 @@ export function useWorkoutWakeLock(enabled: boolean) {
       return
     }
 
-    const wakeLockNavigator = navigator as WakeLockNavigator
+    const wakeLock = (
+      navigator as unknown as { wakeLock?: WakeLockApiLike }
+    ).wakeLock
 
-    if (!wakeLockNavigator.wakeLock) {
+    if (!wakeLock) {
       setStatus('unsupported')
       return
     }
@@ -53,7 +53,7 @@ export function useWorkoutWakeLock(enabled: boolean) {
       setStatus('requesting')
 
       try {
-        sentinel = await wakeLockNavigator.wakeLock!.request('screen')
+        sentinel = await wakeLock.request('screen')
 
         if (disposed) {
           await sentinel.release()
