@@ -1,6 +1,7 @@
 import { getAuthSession } from './auth-session'
 import {
   getSetting,
+  getWorkoutSessions,
   openGymBroDb,
   saveSetting,
   saveWorkoutSession,
@@ -8,6 +9,7 @@ import {
 import { BUILTIN_EXERCISES, createInitialRoutine } from '../data/exercises'
 import type {
   Exercise,
+  ExerciseLastPerformance,
   PlannedWorkoutSet,
   RestTimerState,
   Routine,
@@ -461,6 +463,7 @@ export async function startWorkoutFromRoutine(
           actualReps: null,
           durationSeconds: null,
           completedAt: null,
+          isExtra: false,
           rev: 0,
           syncState: 'local',
           updatedAt: now,
@@ -763,4 +766,417 @@ export async function clearRestTimerState(
     `restTimer:${sessionId}`,
     null,
   )
+}
+
+
+async function getAllPlannedWorkoutSets(): Promise<PlannedWorkoutSet[]> {
+  const db = await openGymBroDb()
+
+  try {
+    const transaction = db.transaction(STORES.workoutSets, 'readonly')
+    const request = transaction.objectStore(STORES.workoutSets).getAll()
+    const all = await requestToPromise(request)
+    await transactionDone(transaction)
+
+    return (all as Array<Partial<PlannedWorkoutSet>>)
+      .filter(
+        (set): set is PlannedWorkoutSet =>
+          typeof set.workoutExerciseId === 'string' &&
+          typeof set.sessionId === 'string' &&
+          typeof set.exerciseId === 'string',
+      )
+      .map((set) => ({
+        ...set,
+        isExtra: set.isExtra ?? false,
+      }))
+  } finally {
+    db.close()
+  }
+}
+
+export async function getActiveWorkoutSession(): Promise<
+  WorkoutSession | undefined
+> {
+  const sessions = await getWorkoutSessions()
+  return sessions.find((session) => session.status === 'active')
+}
+
+export async function getExerciseLastPerformance(
+  exerciseId: string,
+  currentSessionId: string,
+): Promise<ExerciseLastPerformance | null> {
+  const [sessions, allSets] = await Promise.all([
+    getWorkoutSessions(),
+    getAllPlannedWorkoutSets(),
+  ])
+
+  const eligibleSessions = sessions
+    .filter(
+      (session) =>
+        session.id !== currentSessionId &&
+        session.status === 'completed' &&
+        !session.abandonedAt,
+    )
+    .sort(
+      (a, b) =>
+        new Date(b.completedAt ?? b.updatedAt).getTime() -
+        new Date(a.completedAt ?? a.updatedAt).getTime(),
+    )
+
+  for (const session of eligibleSessions) {
+    const sets = allSets
+      .filter(
+        (set) =>
+          set.sessionId === session.id &&
+          set.exerciseId === exerciseId &&
+          set.completedAt !== null,
+      )
+      .sort((a, b) => a.setNumber - b.setNumber)
+
+    if (sets.length === 0) {
+      continue
+    }
+
+    return {
+      sessionId: session.id,
+      completedAt: session.completedAt ?? session.updatedAt,
+      sets: sets.map((set) => ({
+        setNumber: set.setNumber,
+        weightKg: set.actualWeightKg,
+        reps: set.actualReps,
+        durationSeconds: set.durationSeconds,
+      })),
+    }
+  }
+
+  return null
+}
+
+export async function getPreviousBestWeight(
+  exerciseId: string,
+  currentSessionId: string,
+): Promise<number> {
+  const [sessions, allSets] = await Promise.all([
+    getWorkoutSessions(),
+    getAllPlannedWorkoutSets(),
+  ])
+  const validSessionIds = new Set(
+    sessions
+      .filter(
+        (session) =>
+          session.id !== currentSessionId &&
+          session.status === 'completed' &&
+          !session.abandonedAt,
+      )
+      .map((session) => session.id),
+  )
+
+  return allSets
+    .filter(
+      (set) =>
+        set.exerciseId === exerciseId &&
+        validSessionIds.has(set.sessionId) &&
+        set.completedAt !== null &&
+        typeof set.actualWeightKg === 'number',
+    )
+    .reduce(
+      (best, set) => Math.max(best, set.actualWeightKg ?? 0),
+      0,
+    )
+}
+
+export async function mergeRemoteWorkoutSnapshots(
+  remoteExercises: WorkoutExercise[],
+  remoteSets: PlannedWorkoutSet[],
+): Promise<{ exercises: number; sets: number }> {
+  const db = await openGymBroDb()
+
+  try {
+    const transaction = db.transaction(
+      [STORES.workoutExercises, STORES.workoutSets, STORES.syncQueue],
+      'readwrite',
+    )
+    const exerciseStore = transaction.objectStore(STORES.workoutExercises)
+    const setStore = transaction.objectStore(STORES.workoutSets)
+    const queueStore = transaction.objectStore(STORES.syncQueue)
+    const queueRequest = queueStore.getAll()
+    let exercises = 0
+    let sets = 0
+
+    queueRequest.onsuccess = () => {
+      const pending = new Set(
+        (queueRequest.result as SyncQueueItem[]).map((item) => item.id),
+      )
+
+      for (const exercise of remoteExercises) {
+        if (pending.has(`workoutExercise:${exercise.id}`)) continue
+        exerciseStore.put({
+          ...exercise,
+          syncState: 'synced',
+        })
+        exercises += 1
+      }
+
+      for (const set of remoteSets) {
+        if (pending.has(`workoutPlanSet:${set.id}`)) continue
+        setStore.put({
+          ...set,
+          isExtra: set.isExtra ?? false,
+          syncState: 'synced',
+        })
+        sets += 1
+      }
+    }
+
+    await transactionDone(transaction)
+    return { exercises, sets }
+  } finally {
+    db.close()
+  }
+}
+
+export async function replaceWorkoutExercise(
+  workoutExerciseId: string,
+  replacement: Exercise,
+): Promise<void> {
+  const db = await openGymBroDb()
+
+  try {
+    const transaction = db.transaction(
+      [STORES.workoutExercises, STORES.workoutSets, STORES.syncQueue],
+      'readwrite',
+    )
+    const exerciseStore = transaction.objectStore(STORES.workoutExercises)
+    const setStore = transaction.objectStore(STORES.workoutSets)
+    const queueStore = transaction.objectStore(STORES.syncQueue)
+    const exerciseRequest = exerciseStore.get(workoutExerciseId)
+
+    exerciseRequest.onsuccess = () => {
+      const current = exerciseRequest.result as WorkoutExercise | undefined
+      if (!current) return
+
+      const now = new Date().toISOString()
+      const updated: WorkoutExercise = {
+        ...current,
+        replacedExerciseId:
+          current.replacedExerciseId ?? current.exerciseId,
+        exerciseId: replacement.id,
+        exerciseName: replacement.name,
+        syncState: 'pending',
+        updatedAt: now,
+      }
+
+      exerciseStore.put(updated)
+      queueStore.put(
+        makeDomainQueueItem('workoutExercise', updated.id, updated),
+      )
+
+      const setsRequest = setStore.index('sessionId').getAll(current.sessionId)
+      setsRequest.onsuccess = () => {
+        for (const rawSet of setsRequest.result as PlannedWorkoutSet[]) {
+          if (rawSet.workoutExerciseId !== current.id) continue
+
+          const updatedSet: PlannedWorkoutSet = {
+            ...rawSet,
+            exerciseId: replacement.id,
+            exerciseName: replacement.name,
+            syncState: 'pending',
+            updatedAt: now,
+          }
+          setStore.put(updatedSet)
+          queueStore.put(
+            makeDomainQueueItem(
+              'workoutPlanSet',
+              updatedSet.id,
+              updatedSet,
+            ),
+          )
+        }
+      }
+    }
+
+    await transactionDone(transaction)
+  } finally {
+    db.close()
+  }
+}
+
+export async function skipWorkoutExercise(
+  workoutExerciseId: string,
+): Promise<void> {
+  const exercises = await (async () => {
+    const db = await openGymBroDb()
+    try {
+      const transaction = db.transaction(STORES.workoutExercises, 'readonly')
+      const request = transaction.objectStore(STORES.workoutExercises).get(
+        workoutExerciseId,
+      )
+      const current = (await requestToPromise(request)) as
+        | WorkoutExercise
+        | undefined
+      await transactionDone(transaction)
+      return current ? getWorkoutExercises(current.sessionId) : []
+    } finally {
+      db.close()
+    }
+  })()
+
+  const index = exercises.findIndex((exercise) => exercise.id === workoutExerciseId)
+  if (index < 0) return
+
+  const now = new Date().toISOString()
+  const updates = exercises
+    .map((exercise, position) => {
+      if (position === index) {
+        return {
+          ...exercise,
+          status: 'skipped' as const,
+          syncState: 'pending' as const,
+          updatedAt: now,
+        }
+      }
+
+      if (
+        position === index + 1 &&
+        exercise.status === 'pending'
+      ) {
+        return {
+          ...exercise,
+          status: 'active' as const,
+          syncState: 'pending' as const,
+          updatedAt: now,
+        }
+      }
+
+      return exercise
+    })
+    .filter((exercise, position) =>
+      exercise.status !== exercises[position].status,
+    )
+
+  for (const exercise of updates) {
+    await saveWorkoutExerciseProgress(exercise)
+  }
+}
+
+export async function addExerciseToWorkout(
+  sessionId: string,
+  exercise: Exercise,
+): Promise<WorkoutExercise> {
+  const existing = await getWorkoutExercises(sessionId)
+  const now = new Date().toISOString()
+  const workoutExercise: WorkoutExercise = {
+    id: crypto.randomUUID(),
+    sessionId,
+    sourceRoutineExerciseId: null,
+    exerciseId: exercise.id,
+    exerciseName: exercise.name,
+    position:
+      existing.reduce((max, item) => Math.max(max, item.position), -1) + 1,
+    status: existing.some((item) => item.status === 'active')
+      ? 'pending'
+      : 'active',
+    notes: null,
+    restSeconds: 90,
+    replacedExerciseId: null,
+    rev: 0,
+    syncState: 'pending',
+    updatedAt: now,
+  }
+
+  await saveWorkoutExerciseProgress(workoutExercise)
+
+  for (let index = 0; index < 3; index += 1) {
+    await savePlannedWorkoutSet({
+      id: crypto.randomUUID(),
+      sessionId,
+      workoutExerciseId: workoutExercise.id,
+      exerciseId: exercise.id,
+      exerciseName: exercise.name,
+      setNumber: index + 1,
+      targetWeightKg: null,
+      targetReps: 10,
+      targetSeconds: null,
+      actualWeightKg: null,
+      actualReps: null,
+      durationSeconds: null,
+      completedAt: null,
+      isExtra: false,
+      rev: 0,
+      syncState: 'pending',
+      updatedAt: now,
+    })
+  }
+
+  return workoutExercise
+}
+
+export async function addExtraWorkoutSet(
+  sessionId: string,
+  workoutExerciseId: string,
+): Promise<PlannedWorkoutSet> {
+  const sets = (await getPlannedWorkoutSets(sessionId))
+    .filter((set) => set.workoutExerciseId === workoutExerciseId)
+    .sort((a, b) => a.setNumber - b.setNumber)
+
+  if (sets.length === 0) {
+    throw new Error('No encontramos las series de este ejercicio.')
+  }
+
+  const source = sets.at(-1) as PlannedWorkoutSet
+  const now = new Date().toISOString()
+  const extra: PlannedWorkoutSet = {
+    ...source,
+    id: crypto.randomUUID(),
+    setNumber: source.setNumber + 1,
+    actualWeightKg: null,
+    actualReps: null,
+    durationSeconds: null,
+    completedAt: null,
+    isExtra: true,
+    rev: 0,
+    syncState: 'pending',
+    updatedAt: now,
+  }
+
+  await savePlannedWorkoutSet(extra)
+  return extra
+}
+
+export async function removeExtraWorkoutSet(
+  setId: string,
+): Promise<void> {
+  const db = await openGymBroDb()
+
+  try {
+    const transaction = db.transaction(
+      [STORES.workoutSets, STORES.syncQueue],
+      'readwrite',
+    )
+    const setStore = transaction.objectStore(STORES.workoutSets)
+    const queueStore = transaction.objectStore(STORES.syncQueue)
+    const request = setStore.get(setId)
+
+    request.onsuccess = () => {
+      const current = request.result as PlannedWorkoutSet | undefined
+
+      if (!current || !current.isExtra || current.completedAt) {
+        return
+      }
+
+      setStore.delete(setId)
+      queueStore.put(
+        makeDomainQueueItem(
+          'workoutPlanSet',
+          setId,
+          current,
+          'delete',
+        ),
+      )
+    }
+
+    await transactionDone(transaction)
+  } finally {
+    db.close()
+  }
 }
