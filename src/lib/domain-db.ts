@@ -9,6 +9,7 @@ import { BUILTIN_EXERCISES, createInitialRoutine } from '../data/exercises'
 import type {
   Exercise,
   PlannedWorkoutSet,
+  RestTimerState,
   Routine,
   WorkoutExercise,
 } from '../types/domain'
@@ -587,4 +588,166 @@ export async function mergeRemoteRoutines(
   } finally {
     db.close()
   }
+}
+
+
+export async function saveWorkoutExerciseProgress(
+  exercise: WorkoutExercise,
+): Promise<void> {
+  const pending: WorkoutExercise = {
+    ...exercise,
+    syncState: 'pending',
+    updatedAt: new Date().toISOString(),
+  }
+  const db = await openGymBroDb()
+
+  try {
+    const transaction = db.transaction(
+      [STORES.workoutExercises, STORES.syncQueue],
+      'readwrite',
+    )
+    transaction.objectStore(STORES.workoutExercises).put(pending)
+    transaction
+      .objectStore(STORES.syncQueue)
+      .put(
+        makeDomainQueueItem(
+          'workoutExercise',
+          pending.id,
+          pending,
+        ),
+      )
+    await transactionDone(transaction)
+  } finally {
+    db.close()
+  }
+}
+
+export async function savePlannedWorkoutSet(
+  workoutSet: PlannedWorkoutSet,
+): Promise<void> {
+  const pending: PlannedWorkoutSet = {
+    ...workoutSet,
+    syncState: 'pending',
+    updatedAt: new Date().toISOString(),
+  }
+  const db = await openGymBroDb()
+
+  try {
+    const transaction = db.transaction(
+      [STORES.workoutSets, STORES.syncQueue],
+      'readwrite',
+    )
+    transaction.objectStore(STORES.workoutSets).put(pending)
+    transaction
+      .objectStore(STORES.syncQueue)
+      .put(
+        makeDomainQueueItem(
+          'workoutPlanSet',
+          pending.id,
+          pending,
+        ),
+      )
+    await transactionDone(transaction)
+  } finally {
+    db.close()
+  }
+}
+
+export async function completeWorkoutSetAndAdvance(
+  workoutSet: PlannedWorkoutSet,
+  workoutExercises: WorkoutExercise[],
+  allSets: PlannedWorkoutSet[],
+): Promise<{
+  exercises: WorkoutExercise[]
+  completedExercise: WorkoutExercise | null
+}> {
+  await savePlannedWorkoutSet(workoutSet)
+
+  const setsForExercise = allSets.map((set) =>
+    set.id === workoutSet.id ? workoutSet : set,
+  ).filter(
+    (set) => set.workoutExerciseId === workoutSet.workoutExerciseId,
+  )
+
+  const exerciseFinished =
+    setsForExercise.length > 0 &&
+    setsForExercise.every((set) => set.completedAt !== null)
+
+  if (!exerciseFinished) {
+    return {
+      exercises: workoutExercises,
+      completedExercise: null,
+    }
+  }
+
+  const currentIndex = workoutExercises.findIndex(
+    (exercise) => exercise.id === workoutSet.workoutExerciseId,
+  )
+
+  if (currentIndex < 0) {
+    return {
+      exercises: workoutExercises,
+      completedExercise: null,
+    }
+  }
+
+  const nextExercises = workoutExercises.map((exercise, index) => {
+    if (index === currentIndex) {
+      return {
+        ...exercise,
+        status: 'completed' as const,
+        syncState: 'pending' as const,
+        updatedAt: new Date().toISOString(),
+      }
+    }
+
+    if (
+      index === currentIndex + 1 &&
+      exercise.status === 'pending'
+    ) {
+      return {
+        ...exercise,
+        status: 'active' as const,
+        syncState: 'pending' as const,
+        updatedAt: new Date().toISOString(),
+      }
+    }
+
+    return exercise
+  })
+
+  const completedExercise = nextExercises[currentIndex]
+  await saveWorkoutExerciseProgress(completedExercise)
+
+  const nextExercise = nextExercises[currentIndex + 1]
+
+  if (nextExercise && nextExercise.status === 'active') {
+    await saveWorkoutExerciseProgress(nextExercise)
+  }
+
+  return {
+    exercises: nextExercises,
+    completedExercise,
+  }
+}
+
+export async function getRestTimerState(
+  sessionId: string,
+): Promise<RestTimerState | undefined> {
+  return getSetting<RestTimerState>(`restTimer:${sessionId}`)
+}
+
+export async function saveRestTimerState(
+  state: RestTimerState,
+): Promise<void> {
+  await saveSetting(`restTimer:${state.sessionId}`, state)
+}
+
+export async function clearRestTimerState(
+  sessionId: string,
+): Promise<void> {
+  await saveSetting<RestTimerState | null>(
+    `restTimer:${sessionId}`,
+    null,
+  )
 }
