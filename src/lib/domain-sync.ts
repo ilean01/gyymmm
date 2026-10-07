@@ -9,10 +9,15 @@ import type { SyncQueueItem } from '../types/training'
 export async function syncDomainOutbox(
   queue: SyncQueueItem[],
 ): Promise<{ synced: number; failed: number }> {
-  const items = queue.filter(
-    (item) =>
-      item.entityType === 'exercise' || item.entityType === 'routine',
-  )
+  const items = queue
+    .filter(
+      (item) =>
+        item.entityType === 'exercise' || item.entityType === 'routine',
+    )
+    .sort((a, b) => {
+      if (a.entityType === b.entityType) return 0
+      return a.entityType === 'exercise' ? -1 : 1
+    })
 
   let synced = 0
   let failed = 0
