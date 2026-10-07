@@ -127,6 +127,7 @@ type WorkoutPlanSetInput = {
   actualReps: number | null
   durationSeconds: number | null
   completedAt: string | null
+  isExtra: boolean
   rev?: number
   updatedAt: string
 }
@@ -134,9 +135,11 @@ type WorkoutPlanSetInput = {
 type WorkoutSessionInput = {
   id: string
   profileId?: string
+  routineId?: string | null
   routineName: string
   startedAt: string
   completedAt: string | null
+  abandonedAt?: string | null
   status: 'active' | 'completed'
   updatedAt: string
   rev?: number
@@ -174,7 +177,9 @@ type WorkoutSessionRow = {
   routine_name: string
   started_at: string
   completed_at: string | null
+  abandoned_at: string | null
   status: 'active' | 'completed'
+  routine_id: string | null
   updated_at: string
   created_at: string
   user_id: string | null
@@ -189,9 +194,15 @@ type WorkoutSetRow = {
   exercise_id: string
   exercise_name: string
   set_number: number
-  weight_kg: number
-  reps: number
-  completed_at: string
+  weight_kg: number | null
+  reps: number | null
+  completed_at: string | null
+  workout_exercise_id: string | null
+  target_weight_kg: number | null
+  target_reps: number | null
+  target_seconds: number | null
+  duration_seconds: number | null
+  is_extra: number
   updated_at: string
   created_at: string
   user_id: string | null
@@ -708,6 +719,7 @@ function validateWorkoutPlanSet(
       (Number.isInteger(value.durationSeconds) &&
         Number(value.durationSeconds) > 0)) &&
     (value.completedAt === null || isIsoDate(value.completedAt)) &&
+    typeof value.isExtra === 'boolean' &&
     isIsoDate(value.updatedAt)
   )
 }
@@ -722,6 +734,12 @@ function validateSession(input: unknown): input is WorkoutSessionInput {
     isNonEmptyString(value.routineName) &&
     isIsoDate(value.startedAt) &&
     (value.completedAt === null || isIsoDate(value.completedAt)) &&
+    (value.abandonedAt === undefined ||
+      value.abandonedAt === null ||
+      isIsoDate(value.abandonedAt)) &&
+    (value.routineId === undefined ||
+      value.routineId === null ||
+      isNonEmptyString(value.routineId)) &&
     (value.status === 'active' || value.status === 'completed') &&
     isIsoDate(value.updatedAt) &&
     (value.profileId === undefined || isNonEmptyString(value.profileId)) &&
@@ -765,9 +783,11 @@ function sessionRowToApi(row: WorkoutSessionRow) {
   return {
     id: row.id,
     profileId: row.profile_id,
+    routineId: row.routine_id,
     routineName: row.routine_name,
     startedAt: row.started_at,
     completedAt: row.completed_at,
+    abandonedAt: row.abandoned_at,
     status: row.status,
     updatedAt: row.updated_at,
     createdAt: row.created_at,
@@ -973,9 +993,11 @@ async function applySyncMutation(
         .prepare(
           `UPDATE workout_sessions
            SET profile_id = ?,
+               routine_id = ?,
                routine_name = ?,
                started_at = ?,
                completed_at = ?,
+               abandoned_at = ?,
                status = ?,
                updated_at = ?,
                deleted_at = NULL,
@@ -986,9 +1008,11 @@ async function applySyncMutation(
         )
         .bind(
           profileId,
+          payload.routineId ?? null,
           payload.routineName,
           payload.startedAt,
           payload.completedAt,
+          payload.abandonedAt ?? null,
           payload.status,
           payload.updatedAt,
           resultingRev,
@@ -1002,15 +1026,17 @@ async function applySyncMutation(
           `INSERT INTO workout_sessions (
             id,
             profile_id,
+            routine_id,
             routine_name,
             started_at,
             completed_at,
+            abandoned_at,
             status,
             updated_at,
             user_id,
             rev,
             deleted_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`,
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`,
         )
         .bind(
           mutation.entityId,
