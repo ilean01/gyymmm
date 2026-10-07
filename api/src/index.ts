@@ -420,8 +420,10 @@ app.get('/api/v1/workout-sets', async (c) => {
 
 app.get('/api/v1/dev/pbkdf2-benchmark', async (c) => {
   const hostname = new URL(c.req.url).hostname
+  const isLocal = hostname === 'localhost' || hostname === '127.0.0.1'
+  const isTemporaryRemoteBenchmark = c.env.BENCHMARK_ENABLED === 'true'
 
-  if (hostname !== 'localhost' && hostname !== '127.0.0.1') {
+  if (!isLocal && !isTemporaryRemoteBenchmark) {
     return c.json(
       {
         ok: false,
