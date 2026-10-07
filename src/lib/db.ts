@@ -11,7 +11,7 @@ import type {
 } from '../types/training'
 
 const LEGACY_DB_NAME = 'gymbro-db'
-const DB_VERSION = 4
+const DB_VERSION = 5
 
 function currentDatabaseName(): string {
   const userId = getAuthSession()?.user.id
@@ -28,6 +28,9 @@ const STORES = {
   syncQueue: 'syncQueue',
   profiles: 'profiles',
   conflicts: 'syncConflicts',
+  exercises: 'exercises',
+  routines: 'routines',
+  workoutExercises: 'workoutExercises',
 } as const
 
 function requestToPromise<T>(request: IDBRequest<T>): Promise<T> {
@@ -122,6 +125,32 @@ export function openGymBroDb(): Promise<IDBDatabase> {
         })
         conflicts.createIndex('entityType', 'entityType')
         conflicts.createIndex('createdAt', 'createdAt')
+      }
+
+      if (!db.objectStoreNames.contains(STORES.exercises)) {
+        const exercises = db.createObjectStore(STORES.exercises, {
+          keyPath: 'id',
+        })
+        exercises.createIndex('name', 'name')
+        exercises.createIndex('muscleGroup', 'muscleGroup')
+        exercises.createIndex('isBuiltin', 'isBuiltin')
+      }
+
+      if (!db.objectStoreNames.contains(STORES.routines)) {
+        const routines = db.createObjectStore(STORES.routines, {
+          keyPath: 'id',
+        })
+        routines.createIndex('status', 'status')
+        routines.createIndex('updatedAt', 'updatedAt')
+      }
+
+      if (!db.objectStoreNames.contains(STORES.workoutExercises)) {
+        const workoutExercises = db.createObjectStore(
+          STORES.workoutExercises,
+          { keyPath: 'id' },
+        )
+        workoutExercises.createIndex('sessionId', 'sessionId')
+        workoutExercises.createIndex('position', 'position')
       }
 
       if (oldVersion < 2 && upgradeTransaction) {
