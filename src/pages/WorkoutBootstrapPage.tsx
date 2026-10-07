@@ -446,13 +446,13 @@ export function WorkoutBootstrapPage() {
         workoutSet.targetWeightKg ??
         (workoutSet.targetSeconds ? null : 0),
       actualReps:
-        workoutSet.actualReps ??
-        workoutSet.targetReps ??
-        null,
+        workoutSet.actualReps && workoutSet.actualReps > 0
+          ? workoutSet.actualReps
+          : workoutSet.targetReps ?? null,
       durationSeconds:
-        workoutSet.durationSeconds ??
-        workoutSet.targetSeconds ??
-        null,
+        workoutSet.durationSeconds && workoutSet.durationSeconds > 0
+          ? workoutSet.durationSeconds
+          : workoutSet.targetSeconds ?? null,
       completedAt,
       syncState: 'pending',
       updatedAt: completedAt,
@@ -791,7 +791,7 @@ export function WorkoutBootstrapPage() {
                           <div className="mt-4">
                             <NumberInput
                               label="Segundos reales"
-                              min="0"
+                              min="1"
                               value={
                                 workoutSet.durationSeconds === null
                                   ? ''
@@ -807,8 +807,8 @@ export function WorkoutBootstrapPage() {
                                     event.target.value === ''
                                       ? null
                                       : Math.max(
-                                          0,
-                                          Number(event.target.value) || 0,
+                                          1,
+                                          Number(event.target.value) || 1,
                                         ),
                                 })
                               }
@@ -846,7 +846,7 @@ export function WorkoutBootstrapPage() {
 
                             <NumberInput
                               label="Reps reales"
-                              min="0"
+                              min="1"
                               value={
                                 workoutSet.actualReps === null
                                   ? ''
@@ -864,8 +864,8 @@ export function WorkoutBootstrapPage() {
                                     event.target.value === ''
                                       ? null
                                       : Math.max(
-                                          0,
-                                          Number(event.target.value) || 0,
+                                          1,
+                                          Number(event.target.value) || 1,
                                         ),
                                 })
                               }
