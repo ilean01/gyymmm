@@ -38,7 +38,11 @@ function transactionDone(transaction: IDBTransaction): Promise<void> {
 }
 
 function makeDomainQueueItem<T extends { rev: number }>(
-  entityType: 'exercise' | 'routine',
+  entityType:
+    | 'exercise'
+    | 'routine'
+    | 'workoutExercise'
+    | 'workoutPlanSet',
   entityId: string,
   payload: T,
   operation: 'upsert' | 'delete' = 'upsert',
@@ -281,12 +285,23 @@ export async function markDomainSyncSuccess(
   item: SyncQueueItem,
   resultingRev: number,
 ): Promise<void> {
-  if (item.entityType !== 'exercise' && item.entityType !== 'routine') {
+  if (
+    item.entityType !== 'exercise' &&
+    item.entityType !== 'routine' &&
+    item.entityType !== 'workoutExercise' &&
+    item.entityType !== 'workoutPlanSet'
+  ) {
     return
   }
 
   const storeName =
-    item.entityType === 'exercise' ? STORES.exercises : STORES.routines
+    item.entityType === 'exercise'
+      ? STORES.exercises
+      : item.entityType === 'routine'
+        ? STORES.routines
+        : item.entityType === 'workoutExercise'
+          ? STORES.workoutExercises
+          : STORES.workoutSets
   const db = await openGymBroDb()
 
   try {
@@ -382,11 +397,12 @@ export async function startWorkoutFromRoutine(
 
   try {
     const transaction = db.transaction(
-      [STORES.workoutExercises, STORES.workoutSets],
+      [STORES.workoutExercises, STORES.workoutSets, STORES.syncQueue],
       'readwrite',
     )
     const exerciseStore = transaction.objectStore(STORES.workoutExercises)
     const setStore = transaction.objectStore(STORES.workoutSets)
+    const queueStore = transaction.objectStore(STORES.syncQueue)
 
     for (const source of routine.exercises) {
       const workoutExerciseId = crypto.randomUUID()
@@ -407,6 +423,13 @@ export async function startWorkoutFromRoutine(
       }
 
       exerciseStore.put(workoutExercise)
+      queueStore.put(
+        makeDomainQueueItem(
+          'workoutExercise',
+          workoutExercise.id,
+          workoutExercise,
+        ),
+      )
 
       for (const sourceSet of source.sets) {
         const targetReps =
@@ -431,6 +454,13 @@ export async function startWorkoutFromRoutine(
         }
 
         setStore.put(plannedSet)
+        queueStore.put(
+          makeDomainQueueItem(
+            'workoutPlanSet',
+            plannedSet.id,
+            plannedSet,
+          ),
+        )
       }
     }
 
