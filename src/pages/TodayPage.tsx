@@ -18,6 +18,7 @@ import {
   saveWorkoutSession,
   saveWorkoutSet,
 } from '../lib/db'
+import { getAuthSession } from '../lib/auth-session'
 import { createUuid, isUuid } from '../lib/ids'
 import { syncPendingChanges } from '../lib/sync'
 import type {
@@ -34,6 +35,7 @@ export function TodayPage() {
   const [isOnline, setIsOnline] = useState(navigator.onLine)
   const [isSyncing, setIsSyncing] = useState(false)
   const [message, setMessage] = useState('')
+  const hasSession = Boolean(getAuthSession())
 
   async function refreshLocalState() {
     const [storedSets, pendingQueue] = await Promise.all([
@@ -293,16 +295,18 @@ export function TodayPage() {
         </p>
 
         <p className="mt-1 text-sm leading-6 text-gym-muted">
-          {isOnline
-            ? isSyncing
-              ? 'Sincronizando con Cloudflare…'
-              : queue.length > 0
-                ? 'Hay Internet. GymBro reintentará estos cambios automáticamente y después traerá la versión remota.'
-                : 'Sincronización automática activa: GymBro busca cambios cada 5 segundos mientras está abierto.'
-            : 'Podés seguir entrenando sin señal. La cola permanece guardada en IndexedDB.'}
+          {!hasSession
+            ? 'Iniciá sesión para sincronizar esta copia local con Cloudflare.'
+            : isOnline
+              ? isSyncing
+                ? 'Sincronizando con Cloudflare…'
+                : queue.length > 0
+                  ? 'Hay Internet. GymBro reintentará estos cambios automáticamente y después traerá la versión remota.'
+                  : 'Sincronización automática activa: GymBro busca cambios cada 5 segundos mientras está abierto.'
+              : 'Podés seguir entrenando sin señal. La cola permanece guardada en IndexedDB.'}
         </p>
 
-        {isOnline && (
+        {isOnline && hasSession && (
           <Button
             type="button"
             variant="warning"
