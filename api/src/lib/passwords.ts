@@ -62,11 +62,16 @@ async function derivePasswordBytes(
     ['deriveBits'],
   )
 
+  const saltBuffer = salt.buffer.slice(
+    salt.byteOffset,
+    salt.byteOffset + salt.byteLength,
+  ) as ArrayBuffer
+
   const bits = await crypto.subtle.deriveBits(
     {
       name: 'PBKDF2',
       hash: PBKDF2_HASH,
-      salt,
+      salt: saltBuffer,
       iterations,
     },
     keyMaterial,
