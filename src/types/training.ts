@@ -20,6 +20,7 @@ export interface WorkoutSession {
   routineName: string
   startedAt: string
   completedAt: string | null
+  abandonedAt?: string | null
   status: 'active' | 'completed'
   rev: number
   syncState: SyncState
