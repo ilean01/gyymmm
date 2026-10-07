@@ -2352,6 +2352,95 @@ app.put('/api/v1/workout-plan-sets/:id', requireAuth, async (c) => {
   return c.json({ ok: true, rev: nextRev })
 })
 
+app.delete('/api/v1/workout-exercises/:id', requireAuth, async (c) => {
+  const userId = c.get('userId')
+  const baseRev = Number(c.req.query('rev') ?? '0')
+
+  if (!Number.isInteger(baseRev) || baseRev < 0) {
+    return c.json(
+      { ok: false, error: 'invalid_rev', message: 'La revisión no es válida.' },
+      400,
+    )
+  }
+
+  const existing = await c.env.gymbro_db
+    .prepare(
+      `SELECT we.rev
+       FROM workout_exercises we
+       JOIN workout_sessions ws ON ws.id = we.session_id
+       WHERE we.id = ? AND ws.user_id = ?`,
+    )
+    .bind(c.req.param('id'), userId)
+    .first<{ rev: number }>()
+
+  if (!existing) {
+    return c.json({ ok: true, rev: baseRev })
+  }
+
+  if (existing.rev !== baseRev) {
+    return c.json(
+      {
+        ok: false,
+        error: 'sync_conflict',
+        message: 'El ejercicio fue modificado en otro dispositivo.',
+        serverRev: existing.rev,
+        serverPayload: null,
+      },
+      409,
+    )
+  }
+
+  await c.env.gymbro_db
+    .prepare('DELETE FROM workout_exercises WHERE id = ?')
+    .bind(c.req.param('id'))
+    .run()
+
+  return c.json({ ok: true, rev: baseRev + 1 })
+})
+
+app.delete('/api/v1/workout-plan-sets/:id', requireAuth, async (c) => {
+  const userId = c.get('userId')
+  const baseRev = Number(c.req.query('rev') ?? '0')
+
+  if (!Number.isInteger(baseRev) || baseRev < 0) {
+    return c.json(
+      { ok: false, error: 'invalid_rev', message: 'La revisión no es válida.' },
+      400,
+    )
+  }
+
+  const existing = await c.env.gymbro_db
+    .prepare(
+      'SELECT rev FROM workout_sets WHERE id = ? AND user_id = ?',
+    )
+    .bind(c.req.param('id'), userId)
+    .first<{ rev: number }>()
+
+  if (!existing) {
+    return c.json({ ok: true, rev: baseRev })
+  }
+
+  if (existing.rev !== baseRev) {
+    return c.json(
+      {
+        ok: false,
+        error: 'sync_conflict',
+        message: 'La serie fue modificada en otro dispositivo.',
+        serverRev: existing.rev,
+        serverPayload: null,
+      },
+      409,
+    )
+  }
+
+  await c.env.gymbro_db
+    .prepare('DELETE FROM workout_sets WHERE id = ? AND user_id = ?')
+    .bind(c.req.param('id'), userId)
+    .run()
+
+  return c.json({ ok: true, rev: baseRev + 1 })
+})
+
 app.post('/api/v1/sync/push', requireAuth, async (c) => {
   const body = await c.req.json<unknown>().catch(() => null)
 
