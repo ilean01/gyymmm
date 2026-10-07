@@ -1,128 +1,266 @@
 import { ApiError, apiRequest } from './api'
 import { getAuthSession } from './auth-session'
 import {
+  applyRemoteSyncChanges,
+  getSyncMetadata,
   getSyncQueue,
+  markSyncConflict,
   markSyncFailure,
   markSyncSuccess,
-  mergeRemoteWorkoutData,
+  saveSyncMetadata,
 } from './db'
 import type {
   SyncQueueItem,
+  SyncRemoteChange,
   WorkoutSession,
   WorkoutSet,
 } from '../types/training'
 
 let syncInFlight: Promise<SyncSummary> | null = null
 
-interface RemoteWorkoutSession {
-  id: string
-  routineName: string
-  startedAt: string
-  completedAt: string | null
-  status: 'active' | 'completed'
-  updatedAt: string
+type PushResult =
+  | {
+      mutationId: string
+      status: 'applied'
+      entityType: SyncQueueItem['entityType']
+      entityId: string
+      resultingRev: number
+    }
+  | {
+      mutationId: string
+      status: 'conflict'
+      entityType: SyncQueueItem['entityType']
+      entityId: string
+      serverRev: number
+      serverPayload: Record<string, unknown> | null
+    }
+  | {
+      mutationId: string
+      status: 'error'
+      entityType: SyncQueueItem['entityType']
+      entityId: string
+      message: string
+    }
+
+interface PushResponse {
+  ok: true
+  results: PushResult[]
 }
 
-interface RemoteWorkoutSet {
-  id: string
-  sessionId: string
-  exerciseId: string
-  exerciseName: string
-  setNumber: number
-  weightKg: number
-  reps: number
-  completedAt: string
-  updatedAt: string
+interface PullResponse {
+  ok: true
+  bootstrap: boolean
+  cursor: number
+  hasMore: boolean
+  changes: Array<{
+    seq: number
+    entityType: SyncQueueItem['entityType']
+    entityId: string
+    operation: SyncQueueItem['operation']
+    rev: number
+    changedAt?: string
+    data: Record<string, unknown> | null
+  }>
 }
 
 export interface SyncSummary {
   attempted: number
   synced: number
   failed: number
+  conflicts: number
   downloadedSessions: number
   downloadedSets: number
 }
 
-function endpointFor(item: SyncQueueItem): string {
-  if (item.entityType === 'workoutSession') {
-    return `/api/v1/workout-sessions/${encodeURIComponent(item.entityId)}`
+function orderedQueue(queue: SyncQueueItem[]): SyncQueueItem[] {
+  return [...queue]
+    .filter((item) => item.status !== 'conflict')
+    .sort((a, b) => {
+      if (a.entityType !== b.entityType) {
+        return a.entityType === 'workoutSession' ? -1 : 1
+      }
+
+      return (
+        new Date(a.createdAt).getTime() -
+        new Date(b.createdAt).getTime()
+      )
+    })
+}
+
+function normalizeSession(
+  data: Record<string, unknown>,
+  rev: number,
+): WorkoutSession {
+  return {
+    id: String(data.id),
+    routineName: String(data.routineName),
+    startedAt: String(data.startedAt),
+    completedAt:
+      data.completedAt === null ? null : String(data.completedAt),
+    status: data.status === 'completed' ? 'completed' : 'active',
+    rev,
+    syncState: 'synced',
+    updatedAt: String(data.updatedAt),
+  }
+}
+
+function normalizeSet(
+  data: Record<string, unknown>,
+  rev: number,
+): WorkoutSet {
+  return {
+    id: String(data.id),
+    sessionId: String(data.sessionId),
+    exerciseId: String(data.exerciseId),
+    exerciseName: String(data.exerciseName),
+    setNumber: Number(data.setNumber),
+    weightKg: Number(data.weightKg),
+    reps: Number(data.reps),
+    completedAt: String(data.completedAt),
+    rev,
+    syncState: 'synced',
+    updatedAt: String(data.updatedAt),
+  }
+}
+
+function normalizeServerPayload(
+  entityType: SyncQueueItem['entityType'],
+  payload: Record<string, unknown> | null,
+  rev: number,
+): WorkoutSession | WorkoutSet | null {
+  if (!payload) {
+    return null
   }
 
-  return `/api/v1/workout-sets/${encodeURIComponent(item.entityId)}`
+  return entityType === 'workoutSession'
+    ? normalizeSession(payload, rev)
+    : normalizeSet(payload, rev)
 }
 
-function orderedQueue(queue: SyncQueueItem[]): SyncQueueItem[] {
-  return [...queue].sort((a, b) => {
-    if (a.entityType !== b.entityType) {
-      return a.entityType === 'workoutSession' ? -1 : 1
+async function pushPendingChanges(
+  queue: SyncQueueItem[],
+): Promise<{
+  synced: number
+  failed: number
+  conflicts: number
+}> {
+  if (queue.length === 0) {
+    return {
+      synced: 0,
+      failed: 0,
+      conflicts: 0,
     }
+  }
 
-    return (
-      new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
-    )
-  })
-}
-
-async function pushItem(item: SyncQueueItem): Promise<void> {
-  const body = await apiRequest<{ ok: true }>(
-    endpointFor(item),
+  const response = await apiRequest<PushResponse>(
+    '/api/v1/sync/push',
     {
-      method: 'PUT',
-      body: item.payload as WorkoutSession | WorkoutSet,
+      method: 'POST',
+      body: {
+        mutations: queue.map((item) => ({
+          mutationId: item.mutationId,
+          entityType: item.entityType,
+          entityId: item.entityId,
+          operation: item.operation,
+          payload: item.operation === 'delete' ? null : item.payload,
+          baseRev: item.baseRev,
+        })),
+      },
     },
   )
 
-  if (body.ok !== true) {
-    throw new Error('La API no confirmó el cambio.')
-  }
-}
+  let synced = 0
+  let failed = 0
+  let conflicts = 0
 
-async function pullRemoteData(): Promise<{
-  sessions: WorkoutSession[]
-  sets: WorkoutSet[]
-}> {
-  const [sessionsBody, setsBody] = await Promise.all([
-    apiRequest<{
-      ok?: boolean
-      sessions?: RemoteWorkoutSession[]
-    }>('/api/v1/workout-sessions?profileId=default'),
-    apiRequest<{
-      ok?: boolean
-      sets?: RemoteWorkoutSet[]
-    }>('/api/v1/workout-sets?profileId=default'),
-  ])
+  for (const result of response.results) {
+    const item = queue.find(
+      (candidate) => candidate.mutationId === result.mutationId,
+    )
 
-  if (
-    sessionsBody.ok !== true ||
-    setsBody.ok !== true ||
-    !Array.isArray(sessionsBody.sessions) ||
-    !Array.isArray(setsBody.sets)
-  ) {
-    throw new Error('La respuesta de sincronización remota no es válida.')
+    if (!item) {
+      continue
+    }
+
+    if (result.status === 'applied') {
+      await markSyncSuccess(item, result.resultingRev)
+      synced += 1
+      continue
+    }
+
+    if (result.status === 'conflict') {
+      await markSyncConflict(
+        item,
+        result.serverRev,
+        normalizeServerPayload(
+          result.entityType,
+          result.serverPayload,
+          result.serverRev,
+        ),
+      )
+      conflicts += 1
+      continue
+    }
+
+    await markSyncFailure(item, result.message)
+    failed += 1
   }
 
   return {
-    sessions: sessionsBody.sessions.map((session) => ({
-      id: session.id,
-      routineName: session.routineName,
-      startedAt: session.startedAt,
-      completedAt: session.completedAt,
-      status: session.status,
-      updatedAt: session.updatedAt,
-      syncState: 'synced',
-    })),
-    sets: setsBody.sets.map((set) => ({
-      id: set.id,
-      sessionId: set.sessionId,
-      exerciseId: set.exerciseId,
-      exerciseName: set.exerciseName,
-      setNumber: set.setNumber,
-      weightKg: set.weightKg,
-      reps: set.reps,
-      completedAt: set.completedAt,
-      updatedAt: set.updatedAt,
-      syncState: 'synced',
-    })),
+    synced,
+    failed,
+    conflicts,
+  }
+}
+
+async function pullRemoteChanges(): Promise<{
+  downloadedSessions: number
+  downloadedSets: number
+}> {
+  const metadata = await getSyncMetadata()
+  let cursor = metadata.cursor
+  let hasMore = true
+  let downloadedSessions = 0
+  let downloadedSets = 0
+
+  while (hasMore) {
+    const response = await apiRequest<PullResponse>(
+      `/api/v1/sync/pull?cursor=${cursor}`,
+    )
+
+    const changes: SyncRemoteChange[] = response.changes.map(
+      (change) => ({
+        seq: change.seq,
+        entityType: change.entityType,
+        entityId: change.entityId,
+        operation: change.operation,
+        rev: change.rev,
+        changedAt: change.changedAt,
+        data:
+          change.operation === 'delete' || !change.data
+            ? null
+            : change.entityType === 'workoutSession'
+              ? normalizeSession(change.data, change.rev)
+              : normalizeSet(change.data, change.rev),
+      }),
+    )
+
+    const merged = await applyRemoteSyncChanges(changes)
+    downloadedSessions += merged.sessions
+    downloadedSets += merged.sets
+    cursor = response.cursor
+    hasMore = response.hasMore
+  }
+
+  await saveSyncMetadata({
+    cursor,
+    lastSyncAt: new Date().toISOString(),
+    lastError: null,
+  })
+
+  return {
+    downloadedSessions,
+    downloadedSets,
   }
 }
 
@@ -132,6 +270,7 @@ async function runSync(): Promise<SyncSummary> {
       attempted: 0,
       synced: 0,
       failed: 0,
+      conflicts: 0,
       downloadedSessions: 0,
       downloadedSets: 0,
     }
@@ -142,45 +281,42 @@ async function runSync(): Promise<SyncSummary> {
     attempted: queue.length,
     synced: 0,
     failed: 0,
+    conflicts: 0,
     downloadedSessions: 0,
     downloadedSets: 0,
   }
 
-  for (const item of queue) {
-    try {
-      await pushItem(item)
-      await markSyncSuccess(item)
-      summary.synced += 1
-    } catch (error) {
-      if (error instanceof ApiError && error.status === 401) {
-        summary.failed += 1
-        break
-      }
+  try {
+    const pushed = await pushPendingChanges(queue)
+    summary.synced = pushed.synced
+    summary.failed = pushed.failed
+    summary.conflicts = pushed.conflicts
 
-      const message =
+    const pulled = await pullRemoteChanges()
+    summary.downloadedSessions = pulled.downloadedSessions
+    summary.downloadedSets = pulled.downloadedSets
+
+    return summary
+  } catch (error) {
+    const metadata = await getSyncMetadata()
+
+    await saveSyncMetadata({
+      ...metadata,
+      lastError:
         error instanceof Error
           ? error.message
-          : 'Error desconocido de sincronización.'
+          : 'Error desconocido de sincronización.',
+    })
 
-      await markSyncFailure(item, message)
-      summary.failed += 1
-
-      if (item.entityType === 'workoutSession') {
-        break
+    if (error instanceof ApiError && error.status === 401) {
+      return {
+        ...summary,
+        failed: Math.max(summary.failed, 1),
       }
     }
+
+    throw error
   }
-
-  const remote = await pullRemoteData()
-  const merged = await mergeRemoteWorkoutData(
-    remote.sessions,
-    remote.sets,
-  )
-
-  summary.downloadedSessions = merged.sessions
-  summary.downloadedSets = merged.sets
-
-  return summary
 }
 
 export function syncPendingChanges(): Promise<SyncSummary> {
