@@ -1,3 +1,5 @@
+import { apiRequest } from './api'
+import { getAuthSession } from './auth-session'
 import {
   getSyncQueue,
   markSyncFailure,
@@ -9,10 +11,6 @@ import type {
   WorkoutSession,
   WorkoutSet,
 } from '../types/training'
-
-const API_BASE_URL =
-  import.meta.env.VITE_API_URL ??
-  'https://gymbro-api.ileanasanabria14.workers.dev'
 
 let syncInFlight: Promise<SyncSummary> | null = null
 
@@ -47,10 +45,10 @@ export interface SyncSummary {
 
 function endpointFor(item: SyncQueueItem): string {
   if (item.entityType === 'workoutSession') {
-    return `${API_BASE_URL}/api/v1/workout-sessions/${encodeURIComponent(item.entityId)}`
+    return `/api/v1/workout-sessions/${encodeURIComponent(item.entityId)}`
   }
 
-  return `${API_BASE_URL}/api/v1/workout-sets/${encodeURIComponent(item.entityId)}`
+  return `/api/v1/workout-sets/${encodeURIComponent(item.entityId)}`
 }
 
 function orderedQueue(queue: SyncQueueItem[]): SyncQueueItem[] {
@@ -66,24 +64,16 @@ function orderedQueue(queue: SyncQueueItem[]): SyncQueueItem[] {
 }
 
 async function pushItem(item: SyncQueueItem): Promise<void> {
-  const response = await fetch(endpointFor(item), {
-    method: 'PUT',
-    headers: {
-      'Content-Type': 'application/json',
+  const body = await apiRequest<{ ok: true }>(
+    endpointFor(item),
+    {
+      method: 'PUT',
+      body: item.payload as WorkoutSession | WorkoutSet,
     },
-    body: JSON.stringify(
-      item.payload as WorkoutSession | WorkoutSet,
-    ),
-  })
+  )
 
-  const body = (await response.json().catch(() => null)) as
-    | { ok?: boolean; message?: string }
-    | null
-
-  if (!response.ok || body?.ok !== true) {
-    throw new Error(
-      body?.message ?? `La API respondió con estado ${response.status}.`,
-    )
+  if (body.ok !== true) {
+    throw new Error('La API no confirmó el cambio.')
   }
 }
 
@@ -91,23 +81,16 @@ async function pullRemoteData(): Promise<{
   sessions: WorkoutSession[]
   sets: WorkoutSet[]
 }> {
-  const [sessionsResponse, setsResponse] = await Promise.all([
-    fetch(`${API_BASE_URL}/api/v1/workout-sessions?profileId=default`),
-    fetch(`${API_BASE_URL}/api/v1/workout-sets?profileId=default`),
+  const [sessionsBody, setsBody] = await Promise.all([
+    apiRequest<{
+      ok?: boolean
+      sessions?: RemoteWorkoutSession[]
+    }>('/api/v1/workout-sessions?profileId=default'),
+    apiRequest<{
+      ok?: boolean
+      sets?: RemoteWorkoutSet[]
+    }>('/api/v1/workout-sets?profileId=default'),
   ])
-
-  if (!sessionsResponse.ok || !setsResponse.ok) {
-    throw new Error('No se pudieron descargar los cambios remotos.')
-  }
-
-  const sessionsBody = (await sessionsResponse.json()) as {
-    ok?: boolean
-    sessions?: RemoteWorkoutSession[]
-  }
-  const setsBody = (await setsResponse.json()) as {
-    ok?: boolean
-    sets?: RemoteWorkoutSet[]
-  }
 
   if (
     sessionsBody.ok !== true ||
@@ -144,7 +127,7 @@ async function pullRemoteData(): Promise<{
 }
 
 async function runSync(): Promise<SyncSummary> {
-  if (!navigator.onLine) {
+  if (!navigator.onLine || !getAuthSession()) {
     return {
       attempted: 0,
       synced: 0,
