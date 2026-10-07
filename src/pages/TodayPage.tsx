@@ -1,63 +1,62 @@
-import { useEffect, useState } from 'react'
-import type { FormEvent } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import { Link, useNavigate } from 'react-router-dom'
 import { PageSection } from '../components/layout/AppShell'
+import { Badge, Button, Card, StatePanel } from '../components/ui'
 import {
-  Badge,
-  Button,
-  Card,
-  NumberInput,
-  StatePanel,
-} from '../components/ui'
-import {
-  clearWorkoutTestData,
+  getLocalProfile,
   getSyncConflicts,
   getSyncQueue,
-  getSetting,
-  getWorkoutSession,
-  getWorkoutSets,
-  saveSetting,
-  saveWorkoutSession,
-  saveWorkoutSet,
 } from '../lib/db'
-import { getAuthSession } from '../lib/auth-session'
-import { createUuid, isUuid } from '../lib/ids'
+import {
+  getRoutines,
+  seedOfflineDomainData,
+  startWorkoutFromRoutine,
+} from '../lib/domain-db'
 import { syncPendingChanges } from '../lib/sync'
-import type {
-  SyncConflict,
-  SyncQueueItem,
-  WorkoutSession,
-  WorkoutSet,
-} from '../types/training'
+import type { Routine } from '../types/domain'
+import type { SyncConflict, SyncQueueItem } from '../types/training'
+
+const weekdayLabels = [
+  'domingo',
+  'lunes',
+  'martes',
+  'miércoles',
+  'jueves',
+  'viernes',
+  'sábado',
+]
 
 export function TodayPage() {
-  const [sets, setSets] = useState<WorkoutSet[]>([])
+  const navigate = useNavigate()
+  const [routines, setRoutines] = useState<Routine[]>([])
   const [queue, setQueue] = useState<SyncQueueItem[]>([])
   const [conflicts, setConflicts] = useState<SyncConflict[]>([])
-  const [weight, setWeight] = useState('20')
-  const [reps, setReps] = useState('10')
+  const [displayName, setDisplayName] = useState<string | null>(null)
   const [isOnline, setIsOnline] = useState(navigator.onLine)
   const [isSyncing, setIsSyncing] = useState(false)
   const [message, setMessage] = useState('')
-  const hasSession = Boolean(getAuthSession())
 
-  async function refreshLocalState() {
-    const [storedSets, pendingQueue, storedConflicts] = await Promise.all([
-      getWorkoutSets(),
-      getSyncQueue(),
-      getSyncConflicts(),
-    ])
+  async function refresh() {
+    await seedOfflineDomainData()
 
-    setSets(storedSets)
-    setQueue(pendingQueue)
-    setConflicts(storedConflicts)
+    const [localRoutines, localQueue, localConflicts, profile] =
+      await Promise.all([
+        getRoutines(),
+        getSyncQueue(),
+        getSyncConflicts(),
+        getLocalProfile(),
+      ])
+
+    setRoutines(localRoutines)
+    setQueue(localQueue)
+    setConflicts(localConflicts)
+    setDisplayName(profile?.displayName ?? null)
   }
 
   async function handleSync(showMessage = true) {
     if (!navigator.onLine) {
       if (showMessage) {
-        setMessage(
-          'Sin Internet. Los cambios siguen guardados en este dispositivo.',
-        )
+        setMessage('Sin conexión. Tus cambios siguen guardados localmente.')
       }
       return
     }
@@ -66,35 +65,25 @@ export function TodayPage() {
 
     try {
       const summary = await syncPendingChanges()
-      await refreshLocalState()
+      await refresh()
 
       if (showMessage) {
-        const downloaded =
-          summary.downloadedSessions + summary.downloadedSets
-
         if (summary.conflicts > 0) {
           setMessage(
-            `Sincronización detenida por ${summary.conflicts} conflicto(s). Tus datos locales no fueron sobrescritos.`,
+            `Hay ${summary.conflicts} conflicto(s) para revisar; no se sobrescribió nada.`,
           )
         } else if (summary.failed > 0) {
           setMessage(
-            `Subidos: ${summary.synced} · descargados: ${downloaded} · ${summary.failed} quedaron pendientes.`,
-          )
-        } else if (summary.synced > 0 || downloaded > 0) {
-          setMessage(
-            `Sincronización completa: ${summary.synced} subidos y ${downloaded} descargados desde Cloudflare.`,
+            `${summary.failed} cambio(s) siguen pendientes de sincronización.`,
           )
         } else {
-          setMessage('Este dispositivo ya está al día con Cloudflare.')
+          setMessage('GymBro está sincronizado.')
         }
       }
     } catch {
       if (showMessage) {
-        setMessage(
-          'No se pudo completar la sincronización. Los datos locales siguen seguros.',
-        )
+        setMessage('No se pudo sincronizar ahora. Tus datos locales siguen seguros.')
       }
-      await refreshLocalState()
     } finally {
       setIsSyncing(false)
     }
@@ -102,14 +91,10 @@ export function TodayPage() {
 
   useEffect(() => {
     const initialize = async () => {
-      try {
-        await refreshLocalState()
+      await refresh()
 
-        if (navigator.onLine) {
-          await handleSync(false)
-        }
-      } catch {
-        setMessage('No se pudo abrir el almacenamiento local.')
+      if (navigator.onLine) {
+        await handleSync(false)
       }
     }
 
@@ -117,381 +102,219 @@ export function TodayPage() {
   }, [])
 
   useEffect(() => {
-    const handleOnline = () => {
+    const online = () => {
       setIsOnline(true)
-      void handleSync(true)
+      void handleSync(false)
     }
-
-    const handleOffline = () => {
+    const offline = () => {
       setIsOnline(false)
-      setMessage(
-        'Sin conexión. GymBro seguirá guardando los cambios localmente.',
-      )
     }
 
-    window.addEventListener('online', handleOnline)
-    window.addEventListener('offline', handleOffline)
+    window.addEventListener('online', online)
+    window.addEventListener('offline', offline)
 
-    return () => {
-      window.removeEventListener('online', handleOnline)
-      window.removeEventListener('offline', handleOffline)
-    }
-  }, [])
-
-  useEffect(() => {
-    let cancelled = false
-
-    const syncSilently = async () => {
-      if (
-        cancelled ||
-        !navigator.onLine ||
-        document.visibilityState !== 'visible'
-      ) {
-        return
+    const interval = window.setInterval(() => {
+      if (navigator.onLine && document.visibilityState === 'visible') {
+        void handleSync(false)
       }
-
-      try {
-        await syncPendingChanges()
-
-        if (!cancelled) {
-          await refreshLocalState()
-        }
-      } catch {
-        // La sincronización automática es silenciosa.
-      }
-    }
-
-    const handleVisible = () => {
-      if (document.visibilityState === 'visible') {
-        void syncSilently()
-      }
-    }
-
-    const handleFocus = () => {
-      void syncSilently()
-    }
-
-    const intervalId = window.setInterval(() => {
-      void syncSilently()
     }, 5000)
 
-    document.addEventListener('visibilitychange', handleVisible)
-    window.addEventListener('focus', handleFocus)
-
     return () => {
-      cancelled = true
-      window.clearInterval(intervalId)
-      document.removeEventListener('visibilitychange', handleVisible)
-      window.removeEventListener('focus', handleFocus)
+      window.removeEventListener('online', online)
+      window.removeEventListener('offline', offline)
+      window.clearInterval(interval)
     }
   }, [])
 
-  async function ensureTestSession(now: string): Promise<string> {
-    const storedSessionId = await getSetting<string>('testWorkoutSessionId')
+  const today = new Date()
+  const weekday = today.getDay()
 
-    if (isUuid(storedSessionId)) {
-      const existingSession = await getWorkoutSession(storedSessionId)
+  const todaysRoutine = useMemo(() => {
+    const scheduled = routines.find((routine) =>
+      routine.weekdays.includes(weekday),
+    )
 
-      if (existingSession) {
-        return storedSessionId
-      }
-    }
+    return scheduled ?? routines[0] ?? null
+  }, [routines, weekday])
 
-    const sessionId = createUuid()
-    const session: WorkoutSession = {
-      id: sessionId,
-      rev: 0,
-      routineName: 'Rutina offline de prueba',
-      startedAt: now,
-      completedAt: null,
-      status: 'active',
-      syncState: 'pending',
-      updatedAt: now,
-    }
-
-    await saveWorkoutSession(session)
-    await saveSetting('testWorkoutSessionId', sessionId)
-
-    return sessionId
-  }
-
-  async function handleSave(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-
-    const weightKg = Number(weight.replace(',', '.'))
-    const repsValue = Number(reps)
-
-    if (
-      !Number.isFinite(weightKg) ||
-      weightKg < 0 ||
-      !Number.isInteger(repsValue) ||
-      repsValue <= 0
-    ) {
-      setMessage('Revisá el peso y las repeticiones.')
-      return
-    }
-
-    const now = new Date().toISOString()
-
-    const workoutSet: WorkoutSet = {
-      id: createUuid(),
-      rev: 0,
-      sessionId: '',
-      exerciseId: 'hip-thrust',
-      exerciseName: 'Hip Thrust',
-      setNumber: sets.length + 1,
-      weightKg,
-      reps: repsValue,
-      completedAt: now,
-      syncState: 'pending',
-      updatedAt: now,
-    }
+  async function handleStart() {
+    if (!todaysRoutine) return
 
     try {
-      const sessionId = await ensureTestSession(now)
-
-      await saveWorkoutSet({
-        ...workoutSet,
-        sessionId,
-      })
-      await refreshLocalState()
-
-      if (navigator.onLine) {
-        setMessage('Guardado localmente. Sincronizando con Cloudflare…')
-        await handleSync(true)
-      } else {
-        setMessage('Serie guardada. Se sincronizará cuando vuelva Internet.')
-      }
+      const sessionId = await startWorkoutFromRoutine(todaysRoutine.id)
+      navigate(`/workout/${sessionId}`)
     } catch {
-      setMessage('No se pudo guardar la serie.')
+      setMessage('No se pudo iniciar el entrenamiento.')
     }
   }
 
-  async function handleClear() {
-    try {
-      await clearWorkoutTestData()
-      await refreshLocalState()
-      setMessage('Datos y cola de prueba eliminados de este dispositivo.')
-    } catch {
-      setMessage('No se pudieron eliminar los datos de prueba.')
-    }
-  }
+  const formattedDate = new Intl.DateTimeFormat('es-PY', {
+    weekday: 'long',
+    day: 'numeric',
+    month: 'long',
+  }).format(today)
 
   return (
     <PageSection>
       <div className="flex items-center justify-between gap-4">
-        <p className="font-display text-sm font-bold uppercase tracking-[0.22em] text-gym-accent">
-          GymBro
-        </p>
+        <div>
+          <p className="font-display text-sm font-bold uppercase tracking-[0.22em] text-gym-accent">
+            GymBro
+          </p>
+          <p className="mt-1 text-sm capitalize text-gym-muted">
+            {formattedDate}
+          </p>
+        </div>
 
         <Badge tone={isOnline ? 'neutral' : 'warning'}>
           {isOnline ? 'Online' : 'Sin conexión'}
         </Badge>
       </div>
 
-      <h1 className="font-display mt-2 text-5xl font-extrabold uppercase leading-[0.9] tracking-tight">
-        Sincronización bidireccional
+      <h1 className="font-display mt-4 text-5xl font-extrabold uppercase leading-[0.9] tracking-tight">
+        {displayName ? `Hola, ${displayName}` : 'Hoy'}
       </h1>
 
-      <p className="mt-5 max-w-md text-base leading-7 text-gym-muted">
-        GymBro guarda primero en IndexedDB. Cuando hay Internet, sube los
-        cambios pendientes a Cloudflare y también descarga los datos guardados
-        por otros dispositivos.
+      <p className="mt-4 text-gym-muted">
+        {todaysRoutine
+          ? todaysRoutine.weekdays.includes(weekday)
+            ? `Tu rutina para este ${weekdayLabels[weekday]} está lista.`
+            : 'Tenés una rutina disponible, todavía sin día asignado.'
+          : 'Todavía no hay una rutina para entrenar.'}
       </p>
 
-      <div className="mt-6 rounded-gym border border-gym-warning/40 bg-gym-warning/10 p-4">
-        <p className="font-semibold text-gym-warning">
-          {queue.length}{' '}
-          {queue.length === 1 ? 'cambio pendiente' : 'cambios pendientes'}
-        </p>
+      {todaysRoutine ? (
+        <Card className="mt-6 border-gym-accent/30">
+          <p className="text-sm text-gym-muted">
+            {todaysRoutine.weekdays.includes(weekday)
+              ? 'Rutina de hoy'
+              : 'Rutina disponible'}
+          </p>
+          <h2 className="font-display mt-1 text-4xl font-bold uppercase">
+            {todaysRoutine.name}
+          </h2>
+          <p className="mt-2 text-sm text-gym-muted">
+            {todaysRoutine.exercises.length} ejercicios
+            {todaysRoutine.syncState !== 'synced'
+              ? ' · guardada localmente'
+              : ''}
+          </p>
 
-        <p className="mt-1 text-sm leading-6 text-gym-muted">
-          {!hasSession
-            ? 'Iniciá sesión para sincronizar esta copia local con Cloudflare.'
-            : isOnline
-              ? isSyncing
-                ? 'Sincronizando con Cloudflare…'
-                : queue.length > 0
-                  ? 'Hay Internet. GymBro reintentará estos cambios automáticamente y después traerá la versión remota.'
-                  : 'Sincronización automática activa: GymBro busca cambios cada 5 segundos mientras está abierto.'
-              : 'Podés seguir entrenando sin señal. La cola permanece guardada en IndexedDB.'}
-        </p>
-
-        {isOnline && hasSession && (
           <Button
             type="button"
-            variant="warning"
+            fullWidth
+            className="mt-5"
+            onClick={() => void handleStart()}
+          >
+            Iniciar entrenamiento
+          </Button>
+        </Card>
+      ) : (
+        <Card className="mt-6">
+          <StatePanel
+            title="Sin rutina"
+            description="Creá una rutina para que GymBro pueda mostrarte qué toca hoy."
+          />
+          <Link to="/routines/new">
+            <Button type="button" fullWidth className="mt-4">
+              Crear rutina
+            </Button>
+          </Link>
+        </Card>
+      )}
+
+      <div className="mt-4 grid gap-4 sm:grid-cols-2">
+        <Card>
+          <p className="text-sm text-gym-muted">Energía / bienestar</p>
+          <h2 className="font-display mt-1 text-3xl font-bold uppercase">
+            Próximamente
+          </h2>
+          <p className="mt-2 text-sm text-gym-muted">
+            Todavía no registramos bienestar en esta etapa.
+          </p>
+        </Card>
+
+        <Card>
+          <p className="text-sm text-gym-muted">Resumen diario</p>
+          <div className="mt-3 grid grid-cols-3 gap-2 text-center">
+            {[
+              ['Racha', '—'],
+              ['Calorías', '—'],
+              ['Proteína', '—'],
+            ].map(([label, value]) => (
+              <div
+                key={label}
+                className="rounded-gym border border-gym-border bg-gym-bg p-3"
+              >
+                <p className="font-display text-2xl font-bold">{value}</p>
+                <p className="mt-1 text-xs text-gym-muted">{label}</p>
+              </div>
+            ))}
+          </div>
+          <p className="mt-3 text-xs text-gym-muted">
+            No mostramos valores ficticios; estos módulos se implementarán más adelante.
+          </p>
+        </Card>
+      </div>
+
+      <Card className="mt-4">
+        <div className="flex items-center justify-between gap-4">
+          <div>
+            <p className="text-sm text-gym-muted">Sincronización</p>
+            <h2 className="font-display mt-1 text-2xl font-bold uppercase">
+              {conflicts.length > 0
+                ? 'Revisar conflictos'
+                : queue.length > 0
+                  ? 'Cambios pendientes'
+                  : 'Todo al día'}
+            </h2>
+          </div>
+
+          <p className="font-display text-3xl font-bold text-gym-warning">
+            {queue.length}
+          </p>
+        </div>
+
+        <p className="mt-2 text-sm text-gym-muted">
+          {conflicts.length > 0
+            ? `${conflicts.length} conflicto(s) conservados sin sobrescribir datos.`
+            : queue.length > 0
+              ? 'GymBro los enviará automáticamente cuando haya conexión.'
+              : 'No hay cambios esperando sincronización.'}
+        </p>
+
+        {isOnline && (
+          <Button
+            type="button"
+            variant="secondary"
             fullWidth
             loading={isSyncing}
             onClick={() => void handleSync(true)}
-            className="mt-3"
+            className="mt-4"
           >
             Sincronizar ahora
           </Button>
         )}
-      </div>
-
-      <form
-        onSubmit={handleSave}
-        className="mt-4 rounded-gym-lg border border-gym-border bg-gym-card p-5 shadow-gym"
-      >
-        <p className="text-sm text-gym-muted">Ejercicio de prueba</p>
-        <h2 className="font-display mt-1 text-3xl font-bold uppercase">
-          Hip Thrust
-        </h2>
-
-        <div className="mt-5 grid grid-cols-2 gap-3">
-          <NumberInput
-            label="Peso (kg)"
-            decimal
-            min="0"
-            value={weight}
-            onChange={(event) => setWeight(event.target.value)}
-          />
-
-          <NumberInput
-            label="Repeticiones"
-            min="1"
-            value={reps}
-            onChange={(event) => setReps(event.target.value)}
-          />
-        </div>
-
-        <Button type="submit" fullWidth className="mt-5">
-          Guardar serie
-        </Button>
 
         {message && (
           <p className="mt-3 text-sm text-gym-muted" role="status">
             {message}
           </p>
         )}
-      </form>
-
-      <Card className="mt-4">
-        <div className="flex items-end justify-between gap-4">
-          <div>
-            <p className="text-sm text-gym-muted">
-              Guardadas en este dispositivo
-            </p>
-            <h2 className="font-display mt-1 text-3xl font-bold uppercase">
-              Series
-            </h2>
-          </div>
-          <p className="font-display text-4xl font-bold text-gym-accent">
-            {sets.length}
-          </p>
-        </div>
-
-        {sets.length === 0 ? (
-          <StatePanel
-            title="Todavía no hay series"
-            description="Las series que guardes aparecerán acá y quedarán disponibles incluso sin conexión."
-          />
-        ) : (
-          <div className="mt-4 space-y-2">
-            {sets.slice(0, 5).map((set) => (
-              <div
-                key={set.id}
-                className="flex items-center justify-between rounded-gym border border-gym-border bg-gym-bg px-4 py-3"
-              >
-                <div>
-                  <p className="font-semibold">{set.exerciseName}</p>
-                  <p className="text-xs text-gym-muted">
-                    Serie {set.setNumber} ·{' '}
-                    {set.syncState === 'synced'
-                      ? 'sincronizada'
-                      : 'pendiente'}
-                  </p>
-                </div>
-                <p className="font-display text-2xl font-bold">
-                  {set.weightKg} kg × {set.reps}
-                </p>
-              </div>
-            ))}
-          </div>
-        )}
       </Card>
 
-      {conflicts.length > 0 && (
-        <Card className="mt-4 border-gym-warning/50">
-          <div className="flex items-end justify-between gap-4">
-            <div>
-              <p className="text-sm text-gym-muted">Sincronización</p>
-              <h2 className="font-display mt-1 text-3xl font-bold uppercase">
-                Conflictos
-              </h2>
-            </div>
-            <p className="font-display text-4xl font-bold text-gym-warning">
-              {conflicts.length}
-            </p>
-          </div>
-
-          <StatePanel
-            title="Hay cambios para revisar"
-            description="GymBro conservó tu versión local y no sobrescribió nada. La resolución manual se agregará sobre este registro de conflicto."
-          />
-        </Card>
-      )}
-
-      <Card className="mt-4">
-        <div className="flex items-end justify-between gap-4">
-          <div>
-            <p className="text-sm text-gym-muted">Outbox local</p>
-            <h2 className="font-display mt-1 text-3xl font-bold uppercase">
-              Pendientes
-            </h2>
-          </div>
-          <p className="font-display text-4xl font-bold text-gym-warning">
-            {queue.length}
-          </p>
-        </div>
-
-        {queue.length === 0 ? (
-          <StatePanel
-            title="Todo sincronizado"
-            description="No hay cambios esperando sincronización."
-          />
-        ) : (
-          <div className="mt-4 space-y-2">
-            {queue.slice(0, 5).map((item) => (
-              <div
-                key={item.id}
-                className="rounded-gym border border-gym-border bg-gym-bg px-4 py-3"
-              >
-                <div className="flex items-center justify-between gap-3">
-                  <p className="font-semibold">
-                    {item.entityType === 'workoutSet'
-                      ? 'Serie'
-                      : 'Entrenamiento'}
-                  </p>
-                  <Badge tone="warning">Pendiente</Badge>
-                </div>
-                <p className="mt-1 break-all text-xs text-gym-muted">
-                  {item.operation} · intento {item.attempts} · {item.entityId}
-                </p>
-                {item.lastError && (
-                  <p className="mt-1 text-xs text-gym-warning">
-                    Último error: {item.lastError}
-                  </p>
-                )}
-              </div>
-            ))}
-          </div>
-        )}
-
-        {(sets.length > 0 || queue.length > 0) && (
-          <Button
-            type="button"
-            variant="secondary"
-            fullWidth
-            onClick={handleClear}
-            className="mt-4"
-          >
-            Borrar copia local de prueba
+      <div className="mt-4 grid grid-cols-2 gap-3">
+        <Link to="/routines">
+          <Button type="button" variant="secondary" fullWidth>
+            Ver rutinas
           </Button>
-        )}
-      </Card>
+        </Link>
+        <Link to="/exercises">
+          <Button type="button" variant="secondary" fullWidth>
+            Biblioteca
+          </Button>
+        </Link>
+      </div>
     </PageSection>
   )
 }
