@@ -311,24 +311,37 @@ export async function markDomainSyncSuccess(
     )
     const store = transaction.objectStore(storeName)
     const queue = transaction.objectStore(STORES.syncQueue)
-    const entityRequest = store.get(item.entityId)
+    const queueRequest = queue.get(item.id)
 
-    entityRequest.onsuccess = () => {
-      const entity = entityRequest.result as
-        | Exercise
-        | Routine
-        | undefined
+    queueRequest.onsuccess = () => {
+      const current = queueRequest.result as SyncQueueItem | undefined
 
-      if (entity && item.operation !== 'delete') {
-        store.put({
-          ...entity,
-          rev: resultingRev,
-          syncState: 'synced',
-        })
+      if (!current || current.mutationId !== item.mutationId) {
+        return
       }
+
+      const entityRequest = store.get(item.entityId)
+
+      entityRequest.onsuccess = () => {
+        const entity = entityRequest.result as
+          | Exercise
+          | Routine
+          | WorkoutExercise
+          | PlannedWorkoutSet
+          | undefined
+
+        if (entity && item.operation !== 'delete') {
+          store.put({
+            ...entity,
+            rev: resultingRev,
+            syncState: 'synced',
+          })
+        }
+      }
+
+      queue.delete(item.id)
     }
 
-    queue.delete(item.id)
     await transactionDone(transaction)
   } finally {
     db.close()
@@ -349,7 +362,7 @@ export async function markDomainSyncFailure(
     request.onsuccess = () => {
       const current = request.result as SyncQueueItem | undefined
 
-      if (!current) {
+      if (!current || current.mutationId !== item.mutationId) {
         return
       }
 
