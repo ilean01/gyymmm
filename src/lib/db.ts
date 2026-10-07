@@ -384,6 +384,7 @@ export async function getSyncQueue(): Promise<SyncQueueItem[]> {
 
 export async function markSyncSuccess(
   item: SyncQueueItem,
+  resultingRev?: number,
 ): Promise<void> {
   const db = await openGymBroDb()
 
@@ -423,6 +424,10 @@ export async function markSyncSuccess(
         if (entity && entity.updatedAt === payload.updatedAt) {
           entityStore.put({
             ...entity,
+            rev:
+              typeof resultingRev === 'number'
+                ? resultingRev
+                : entity.rev,
             syncState: 'synced',
           })
         }
@@ -457,6 +462,7 @@ export async function markSyncFailure(
 
       store.put({
         ...current,
+        status: 'error',
         attempts: current.attempts + 1,
         lastError: errorMessage,
         updatedAt: new Date().toISOString(),
@@ -617,4 +623,176 @@ export async function getSetting<T>(key: string): Promise<T | undefined> {
   } finally {
     db.close()
   }
+}
+
+
+export async function markSyncConflict(
+  item: SyncQueueItem,
+  serverRev: number,
+  serverPayload: WorkoutSession | WorkoutSet | null,
+): Promise<void> {
+  const db = await openGymBroDb()
+
+  try {
+    const entityStoreName =
+      item.entityType === 'workoutSession' ? STORES.sessions : STORES.sets
+    const transaction = db.transaction(
+      [entityStoreName, STORES.syncQueue, STORES.conflicts],
+      'readwrite',
+    )
+    const queueStore = transaction.objectStore(STORES.syncQueue)
+    const entityStore = transaction.objectStore(entityStoreName)
+    const conflictsStore = transaction.objectStore(STORES.conflicts)
+    const currentRequest = queueStore.get(item.id)
+
+    currentRequest.onsuccess = () => {
+      const current = currentRequest.result as SyncQueueItem | undefined
+
+      if (!current || current.mutationId !== item.mutationId) {
+        return
+      }
+
+      queueStore.put({
+        ...current,
+        status: 'conflict',
+        lastError: 'El servidor tiene una versión más nueva.',
+        updatedAt: new Date().toISOString(),
+      })
+
+      const entityRequest = entityStore.get(item.entityId)
+
+      entityRequest.onsuccess = () => {
+        const entity = entityRequest.result as
+          | WorkoutSession
+          | WorkoutSet
+          | undefined
+
+        if (entity) {
+          entityStore.put({
+            ...entity,
+            syncState: 'conflict',
+          })
+        }
+      }
+
+      const conflict: SyncConflict = {
+        id: `${item.entityType}:${item.entityId}`,
+        entityType: item.entityType,
+        entityId: item.entityId,
+        mutationId: item.mutationId,
+        localPayload: item.payload,
+        serverPayload,
+        baseRev: item.baseRev,
+        serverRev,
+        createdAt: new Date().toISOString(),
+      }
+
+      conflictsStore.put(conflict)
+    }
+
+    await transactionDone(transaction)
+  } finally {
+    db.close()
+  }
+}
+
+export async function getSyncConflicts(): Promise<SyncConflict[]> {
+  const db = await openGymBroDb()
+
+  try {
+    const transaction = db.transaction(STORES.conflicts, 'readonly')
+    const request = transaction.objectStore(STORES.conflicts).getAll()
+    const conflicts = await requestToPromise(request)
+    await transactionDone(transaction)
+
+    return conflicts.sort(
+      (a, b) =>
+        new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+    )
+  } finally {
+    db.close()
+  }
+}
+
+export async function clearSyncConflict(
+  entityType: SyncConflict['entityType'],
+  entityId: string,
+): Promise<void> {
+  const db = await openGymBroDb()
+
+  try {
+    const transaction = db.transaction(STORES.conflicts, 'readwrite')
+    transaction
+      .objectStore(STORES.conflicts)
+      .delete(`${entityType}:${entityId}`)
+    await transactionDone(transaction)
+  } finally {
+    db.close()
+  }
+}
+
+export async function saveLocalProfile(
+  user: AuthUser,
+  profile: AuthProfile | null,
+): Promise<void> {
+  const db = await openGymBroDb()
+
+  try {
+    const transaction = db.transaction(STORES.profiles, 'readwrite')
+    transaction.objectStore(STORES.profiles).put({
+      userId: user.id,
+      email: user.email,
+      displayName: profile?.displayName ?? null,
+      timezone: profile?.timezone ?? 'America/Asuncion',
+      updatedAt: new Date().toISOString(),
+    })
+    await transactionDone(transaction)
+  } finally {
+    db.close()
+  }
+}
+
+export async function getLocalProfile(): Promise<
+  | {
+      userId: string
+      email: string
+      displayName: string | null
+      timezone: string
+      updatedAt: string
+    }
+  | undefined
+> {
+  const session = getAuthSession()
+
+  if (!session) {
+    return undefined
+  }
+
+  const db = await openGymBroDb()
+
+  try {
+    const transaction = db.transaction(STORES.profiles, 'readonly')
+    const request = transaction.objectStore(STORES.profiles).get(session.user.id)
+    const profile = await requestToPromise(request)
+    await transactionDone(transaction)
+    return profile
+  } finally {
+    db.close()
+  }
+}
+
+export async function getSyncMetadata(): Promise<SyncMetadata> {
+  return (
+    (await getSetting<SyncMetadata>('syncMetadata')) ?? {
+      cursor: 0,
+      lastSyncAt: null,
+      lastError: null,
+    }
+  )
+}
+
+export async function saveSyncMetadata(
+  metadata: SyncMetadata,
+): Promise<void> {
+  await saveSetting('syncMetadata', metadata)
 }
