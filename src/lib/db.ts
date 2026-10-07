@@ -5,6 +5,7 @@ import type {
   SyncConflict,
   SyncMetadata,
   SyncQueueItem,
+  SyncRemoteChange,
   WorkoutSession,
   WorkoutSet,
 } from '../types/training'
@@ -244,6 +245,7 @@ export function openGymBroDb(): Promise<IDBDatabase> {
             const firstSet = cursor.value as WorkoutSet
             const session: WorkoutSession = {
               id: 'offline-test-session',
+              rev: 0,
               routineName: 'Rutina offline de prueba',
               startedAt: firstSet.completedAt,
               completedAt: null,
@@ -795,4 +797,77 @@ export async function saveSyncMetadata(
   metadata: SyncMetadata,
 ): Promise<void> {
   await saveSetting('syncMetadata', metadata)
+}
+
+
+export async function applyRemoteSyncChanges(
+  changes: SyncRemoteChange[],
+): Promise<{ sessions: number; sets: number }> {
+  const db = await openGymBroDb()
+
+  try {
+    const transaction = db.transaction(
+      [STORES.sessions, STORES.sets, STORES.syncQueue],
+      'readwrite',
+    )
+    const sessionsStore = transaction.objectStore(STORES.sessions)
+    const setsStore = transaction.objectStore(STORES.sets)
+    const queueStore = transaction.objectStore(STORES.syncQueue)
+    let sessions = 0
+    let sets = 0
+
+    const queueRequest = queueStore.getAll()
+
+    queueRequest.onsuccess = () => {
+      const pending = new Set(
+        (queueRequest.result as SyncQueueItem[]).map((item) => item.id),
+      )
+
+      for (const change of changes) {
+        const queueId = `${change.entityType}:${change.entityId}`
+
+        if (pending.has(queueId)) {
+          continue
+        }
+
+        const store =
+          change.entityType === 'workoutSession'
+            ? sessionsStore
+            : setsStore
+
+        if (change.operation === 'delete') {
+          store.delete(change.entityId)
+
+          if (change.entityType === 'workoutSession') {
+            sessions += 1
+          } else {
+            sets += 1
+          }
+
+          continue
+        }
+
+        if (!change.data) {
+          continue
+        }
+
+        store.put({
+          ...change.data,
+          rev: change.rev,
+          syncState: 'synced',
+        })
+
+        if (change.entityType === 'workoutSession') {
+          sessions += 1
+        } else {
+          sets += 1
+        }
+      }
+    }
+
+    await transactionDone(transaction)
+    return { sessions, sets }
+  } finally {
+    db.close()
+  }
 }
