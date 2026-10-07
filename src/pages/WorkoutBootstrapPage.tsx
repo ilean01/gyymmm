@@ -297,9 +297,6 @@ export function WorkoutBootstrapPage() {
     [sets],
   )
 
-  const progressPercent =
-    sets.length > 0 ? (completedSets / sets.length) * 100 : 0
-
   const volumeKg = useMemo(
     () => calculateWorkoutVolume(sets),
     [sets],
