@@ -30,7 +30,6 @@ export async function syncDomainOutbox(
 
   let synced = 0
   let failed = 0
-  let conflicts = 0
 
   for (const item of items) {
     try {
@@ -119,6 +118,7 @@ export async function syncWorkoutSnapshotOutbox(
 
   let synced = 0
   let failed = 0
+  let conflicts = 0
 
   for (const item of items) {
     try {
