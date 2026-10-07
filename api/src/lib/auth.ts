@@ -4,6 +4,11 @@ export interface RegisterInput {
   displayName?: string
 }
 
+export interface LoginInput {
+  email: string
+  password: string
+}
+
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
 export function normalizeEmail(email: string): string {
@@ -82,6 +87,56 @@ export function validateRegisterInput(
         value.displayName.trim().length > 0
           ? value.displayName.trim()
           : undefined,
+    },
+  }
+}
+
+
+export function validateLoginInput(
+  input: unknown,
+):
+  | { ok: true; value: LoginInput }
+  | { ok: false; message: string } {
+  if (!input || typeof input !== 'object') {
+    return {
+      ok: false,
+      message: 'Los datos de inicio de sesión no son válidos.',
+    }
+  }
+
+  const value = input as Record<string, unknown>
+
+  if (
+    typeof value.email !== 'string' ||
+    typeof value.password !== 'string'
+  ) {
+    return {
+      ok: false,
+      message: 'Ingresá tu email y contraseña.',
+    }
+  }
+
+  const email = normalizeEmail(value.email)
+
+  if (email.length > 254 || !EMAIL_PATTERN.test(email)) {
+    return {
+      ok: false,
+      message: 'Ingresá un email válido.',
+    }
+  }
+
+  if (value.password.length === 0 || value.password.length > 128) {
+    return {
+      ok: false,
+      message: 'Ingresá una contraseña válida.',
+    }
+  }
+
+  return {
+    ok: true,
+    value: {
+      email,
+      password: value.password,
     },
   }
 }
