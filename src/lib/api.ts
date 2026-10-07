@@ -19,6 +19,7 @@ interface ApiErrorBody {
   ok?: false
   error?: string
   message?: string
+  [key: string]: unknown
 }
 
 interface ApiRequestOptions
@@ -31,16 +32,19 @@ interface ApiRequestOptions
 export class ApiError extends Error {
   status: number
   code: string | null
+  details: ApiErrorBody | null
 
   constructor(
     message: string,
     status: number,
     code: string | null = null,
+    details: ApiErrorBody | null = null,
   ) {
     super(message)
     this.name = 'ApiError'
     this.status = status
     this.code = code
+    this.details = details
   }
 }
 
@@ -106,6 +110,7 @@ export async function apiRequest<T>(
         `GymBro API respondió con estado ${response.status}.`,
       response.status,
       errorBody?.error ?? null,
+      errorBody,
     )
   }
 
