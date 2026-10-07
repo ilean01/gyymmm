@@ -41,6 +41,63 @@ type AppEnv = {
   Variables: Variables
 }
 
+type ExerciseInput = {
+  id: string
+  name: string
+  muscleGroup: string
+  equipment: string
+  instructions: string
+  imagePath: string | null
+  rev?: number
+}
+
+type RoutineSetInput = {
+  id: string
+  setNumber: number
+  setType: 'warmup' | 'normal' | 'drop'
+  targetRepsMin: number | null
+  targetRepsMax: number | null
+  targetSeconds: number | null
+  targetWeightKg: number | null
+  notes: string | null
+  rev?: number
+}
+
+type RoutineExerciseInput = {
+  id: string
+  exerciseId: string
+  exerciseName: string
+  position: number
+  notes: string | null
+  restSeconds: number | null
+  rev?: number
+  sets: RoutineSetInput[]
+}
+
+type RoutineInput = {
+  id: string
+  name: string
+  notes: string | null
+  status: 'active' | 'archived'
+  weekdays: number[]
+  exercises: RoutineExerciseInput[]
+  rev?: number
+}
+
+type ExerciseRow = {
+  id: string
+  owner_user_id: string | null
+  name: string
+  muscle_group: string | null
+  equipment: string | null
+  instructions: string | null
+  image_path: string | null
+  is_builtin: number
+  archived_at: string | null
+  rev: number
+  updated_at: string
+}
+
 type WorkoutSessionInput = {
   id: string
   profileId?: string
@@ -212,6 +269,348 @@ function isIsoDate(value: unknown): value is string {
     typeof value === 'string' &&
     !Number.isNaN(Date.parse(value))
   )
+}
+
+function validateExercise(input: unknown): input is ExerciseInput {
+  if (!input || typeof input !== 'object') return false
+  const value = input as Record<string, unknown>
+
+  return (
+    isNonEmptyString(value.id) &&
+    isNonEmptyString(value.name) &&
+    typeof value.muscleGroup === 'string' &&
+    typeof value.equipment === 'string' &&
+    typeof value.instructions === 'string' &&
+    (value.imagePath === null || typeof value.imagePath === 'string') &&
+    (value.rev === undefined ||
+      (typeof value.rev === 'number' &&
+        Number.isInteger(value.rev) &&
+        value.rev >= 0))
+  )
+}
+
+function validateRoutine(input: unknown): input is RoutineInput {
+  if (!input || typeof input !== 'object') return false
+  const value = input as Record<string, unknown>
+
+  if (
+    !isNonEmptyString(value.id) ||
+    !isNonEmptyString(value.name) ||
+    !(value.notes === null || typeof value.notes === 'string') ||
+    (value.status !== 'active' && value.status !== 'archived') ||
+    !Array.isArray(value.weekdays) ||
+    !value.weekdays.every(
+      (day) => Number.isInteger(day) && Number(day) >= 0 && Number(day) <= 6,
+    ) ||
+    !Array.isArray(value.exercises)
+  ) {
+    return false
+  }
+
+  return value.exercises.every((exercise) => {
+    if (!exercise || typeof exercise !== 'object') return false
+    const item = exercise as Record<string, unknown>
+
+    if (
+      !isNonEmptyString(item.id) ||
+      !isNonEmptyString(item.exerciseId) ||
+      !isNonEmptyString(item.exerciseName) ||
+      !Number.isInteger(item.position) ||
+      Number(item.position) < 0 ||
+      !(item.notes === null || typeof item.notes === 'string') ||
+      !(
+        item.restSeconds === null ||
+        (Number.isInteger(item.restSeconds) && Number(item.restSeconds) >= 0)
+      ) ||
+      !Array.isArray(item.sets)
+    ) {
+      return false
+    }
+
+    return item.sets.every((set) => {
+      if (!set || typeof set !== 'object') return false
+      const row = set as Record<string, unknown>
+
+      return (
+        isNonEmptyString(row.id) &&
+        Number.isInteger(row.setNumber) &&
+        Number(row.setNumber) > 0 &&
+        (row.setType === 'warmup' ||
+          row.setType === 'normal' ||
+          row.setType === 'drop') &&
+        (row.targetRepsMin === null ||
+          (Number.isInteger(row.targetRepsMin) &&
+            Number(row.targetRepsMin) > 0)) &&
+        (row.targetRepsMax === null ||
+          (Number.isInteger(row.targetRepsMax) &&
+            Number(row.targetRepsMax) > 0)) &&
+        (row.targetSeconds === null ||
+          (Number.isInteger(row.targetSeconds) &&
+            Number(row.targetSeconds) > 0)) &&
+        (row.targetWeightKg === null ||
+          (typeof row.targetWeightKg === 'number' &&
+            Number.isFinite(row.targetWeightKg) &&
+            Number(row.targetWeightKg) >= 0)) &&
+        (row.notes === null || typeof row.notes === 'string')
+      )
+    })
+  })
+}
+
+function exerciseRowToApi(row: ExerciseRow) {
+  return {
+    id: row.id,
+    ownerUserId: row.owner_user_id,
+    name: row.name,
+    muscleGroup: row.muscle_group ?? '',
+    equipment: row.equipment ?? '',
+    instructions: row.instructions ?? '',
+    imagePath: row.image_path,
+    isBuiltin: row.is_builtin === 1,
+    archivedAt: row.archived_at,
+    rev: row.rev,
+    updatedAt: row.updated_at,
+  }
+}
+
+async function getRoutineAggregate(
+  db: D1DatabaseBinding,
+  userId: string,
+  routineId: string,
+): Promise<Record<string, unknown> | null> {
+  const routine = await db
+    .prepare(
+      `SELECT id, name, notes, status, rev, updated_at
+       FROM routines
+       WHERE id = ? AND user_id = ?`,
+    )
+    .bind(routineId, userId)
+    .first<{
+      id: string
+      name: string
+      notes: string | null
+      status: 'active' | 'archived'
+      rev: number
+      updated_at: string
+    }>()
+
+  if (!routine) return null
+
+  const [schedule, exercises] = await Promise.all([
+    db
+      .prepare(
+        'SELECT weekday FROM routine_schedule WHERE routine_id = ? ORDER BY weekday',
+      )
+      .bind(routineId)
+      .all<{ weekday: number }>(),
+    db
+      .prepare(
+        `SELECT
+          re.id,
+          re.exercise_id,
+          e.name AS exercise_name,
+          re.position,
+          re.notes,
+          re.rest_seconds,
+          re.rev
+         FROM routine_exercises re
+         JOIN exercises e ON e.id = re.exercise_id
+         WHERE re.routine_id = ?
+         ORDER BY re.position`,
+      )
+      .bind(routineId)
+      .all<{
+        id: string
+        exercise_id: string
+        exercise_name: string
+        position: number
+        notes: string | null
+        rest_seconds: number | null
+        rev: number
+      }>(),
+  ])
+
+  const exercisePayload = []
+
+  for (const exercise of exercises.results ?? []) {
+    const sets = await db
+      .prepare(
+        `SELECT
+          id,
+          set_number,
+          set_type,
+          target_reps_min,
+          target_reps_max,
+          target_seconds,
+          target_weight_kg,
+          notes,
+          rev
+         FROM routine_sets
+         WHERE routine_exercise_id = ?
+         ORDER BY set_number`,
+      )
+      .bind(exercise.id)
+      .all<{
+        id: string
+        set_number: number
+        set_type: 'warmup' | 'normal' | 'drop'
+        target_reps_min: number | null
+        target_reps_max: number | null
+        target_seconds: number | null
+        target_weight_kg: number | null
+        notes: string | null
+        rev: number
+      }>()
+
+    exercisePayload.push({
+      id: exercise.id,
+      exerciseId: exercise.exercise_id,
+      exerciseName: exercise.exercise_name,
+      position: exercise.position,
+      notes: exercise.notes,
+      restSeconds: exercise.rest_seconds,
+      rev: exercise.rev,
+      sets: (sets.results ?? []).map((set) => ({
+        id: set.id,
+        setNumber: set.set_number,
+        setType: set.set_type,
+        targetRepsMin: set.target_reps_min,
+        targetRepsMax: set.target_reps_max,
+        targetSeconds: set.target_seconds,
+        targetWeightKg: set.target_weight_kg,
+        notes: set.notes,
+        rev: set.rev,
+      })),
+    })
+  }
+
+  return {
+    id: routine.id,
+    name: routine.name,
+    notes: routine.notes,
+    status: routine.status,
+    weekdays: (schedule.results ?? []).map((row) => row.weekday),
+    exercises: exercisePayload,
+    rev: routine.rev,
+    updatedAt: routine.updated_at,
+  }
+}
+
+async function replaceRoutineAggregate(
+  db: D1DatabaseBinding,
+  userId: string,
+  routine: RoutineInput,
+  existingRev: number | null,
+): Promise<number> {
+  const now = new Date().toISOString()
+  const nextRev = existingRev === null ? 1 : existingRev + 1
+  const statements: D1Statement[] = []
+
+  if (existingRev === null) {
+    statements.push(
+      db
+        .prepare(
+          `INSERT INTO routines (
+            id, user_id, name, notes, status, rev, created_at, updated_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .bind(
+          routine.id,
+          userId,
+          routine.name,
+          routine.notes,
+          routine.status,
+          nextRev,
+          now,
+          now,
+        ),
+    )
+  } else {
+    statements.push(
+      db
+        .prepare(
+          `UPDATE routines
+           SET name = ?, notes = ?, status = ?, rev = ?, updated_at = ?
+           WHERE id = ? AND user_id = ?`,
+        )
+        .bind(
+          routine.name,
+          routine.notes,
+          routine.status,
+          nextRev,
+          now,
+          routine.id,
+          userId,
+        ),
+    )
+  }
+
+  statements.push(
+    db.prepare('DELETE FROM routine_sets WHERE routine_exercise_id IN (SELECT id FROM routine_exercises WHERE routine_id = ?)').bind(routine.id),
+    db.prepare('DELETE FROM routine_exercises WHERE routine_id = ?').bind(routine.id),
+    db.prepare('DELETE FROM routine_schedule WHERE routine_id = ?').bind(routine.id),
+  )
+
+  for (const weekday of routine.weekdays) {
+    statements.push(
+      db
+        .prepare(
+          'INSERT INTO routine_schedule (routine_id, weekday) VALUES (?, ?)',
+        )
+        .bind(routine.id, weekday),
+    )
+  }
+
+  for (const exercise of routine.exercises) {
+    statements.push(
+      db
+        .prepare(
+          `INSERT INTO routine_exercises (
+            id, routine_id, exercise_id, position, notes, rest_seconds, rev,
+            created_at, updated_at
+          ) VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)`,
+        )
+        .bind(
+          exercise.id,
+          routine.id,
+          exercise.exerciseId,
+          exercise.position,
+          exercise.notes,
+          exercise.restSeconds,
+          now,
+          now,
+        ),
+    )
+
+    for (const set of exercise.sets) {
+      statements.push(
+        db
+          .prepare(
+            `INSERT INTO routine_sets (
+              id, routine_exercise_id, set_number, set_type,
+              target_reps_min, target_reps_max, target_seconds,
+              target_weight_kg, notes, rev, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
+          )
+          .bind(
+            set.id,
+            exercise.id,
+            set.setNumber,
+            set.setType,
+            set.targetRepsMin,
+            set.targetRepsMax,
+            set.targetSeconds,
+            set.targetWeightKg,
+            set.notes,
+            now,
+            now,
+          ),
+      )
+    }
+  }
+
+  await db.batch(statements)
+  return nextRev
 }
 
 function validateSession(input: unknown): input is WorkoutSessionInput {
@@ -1103,6 +1502,240 @@ app.get('/api/v1/sync/status', async (c) => {
       ? 'API y Cloudflare D1 están conectados correctamente.'
       : 'La API responde, pero faltan tablas requeridas en D1.',
   })
+})
+
+app.get('/api/v1/exercises', requireAuth, async (c) => {
+  const userId = c.get('userId')
+  const result = await c.env.gymbro_db
+    .prepare(
+      `SELECT *
+       FROM exercises
+       WHERE archived_at IS NULL
+         AND (is_builtin = 1 OR owner_user_id = ?)
+       ORDER BY name COLLATE NOCASE`,
+    )
+    .bind(userId)
+    .all<ExerciseRow>()
+
+  return c.json({
+    ok: true,
+    exercises: (result.results ?? []).map(exerciseRowToApi),
+  })
+})
+
+app.post('/api/v1/exercises', requireAuth, async (c) => {
+  const input = await c.req.json<unknown>().catch(() => null)
+
+  if (!validateExercise(input)) {
+    return c.json(
+      { ok: false, error: 'invalid_exercise', message: 'El ejercicio no es válido.' },
+      400,
+    )
+  }
+
+  const userId = c.get('userId')
+  const now = new Date().toISOString()
+  await c.env.gymbro_db
+    .prepare(
+      `INSERT INTO exercises (
+        id, owner_user_id, name, muscle_group, equipment, instructions,
+        image_path, is_builtin, archived_at, rev, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, NULL, 1, ?, ?)`,
+    )
+    .bind(
+      input.id,
+      userId,
+      input.name,
+      input.muscleGroup,
+      input.equipment,
+      input.instructions,
+      input.imagePath,
+      now,
+      now,
+    )
+    .run()
+
+  return c.json({ ok: true, exercise: { ...input, ownerUserId: userId, isBuiltin: false, archivedAt: null, rev: 1, updatedAt: now } }, 201)
+})
+
+app.put('/api/v1/exercises/:id', requireAuth, async (c) => {
+  const input = await c.req.json<unknown>().catch(() => null)
+
+  if (!validateExercise(input) || input.id !== c.req.param('id')) {
+    return c.json(
+      { ok: false, error: 'invalid_exercise', message: 'El ejercicio no es válido.' },
+      400,
+    )
+  }
+
+  const userId = c.get('userId')
+  const existing = await c.env.gymbro_db
+    .prepare(
+      'SELECT * FROM exercises WHERE id = ? AND owner_user_id = ? AND is_builtin = 0',
+    )
+    .bind(input.id, userId)
+    .first<ExerciseRow>()
+
+  if (!existing) {
+    return c.json({ ok: false, error: 'not_found', message: 'El ejercicio no existe.' }, 404)
+  }
+
+  const nextRev = existing.rev + 1
+  const now = new Date().toISOString()
+  await c.env.gymbro_db
+    .prepare(
+      `UPDATE exercises
+       SET name = ?, muscle_group = ?, equipment = ?, instructions = ?,
+           image_path = ?, archived_at = NULL, rev = ?, updated_at = ?
+       WHERE id = ? AND owner_user_id = ?`,
+    )
+    .bind(
+      input.name,
+      input.muscleGroup,
+      input.equipment,
+      input.instructions,
+      input.imagePath,
+      nextRev,
+      now,
+      input.id,
+      userId,
+    )
+    .run()
+
+  return c.json({ ok: true, exercise: { ...input, ownerUserId: userId, isBuiltin: false, archivedAt: null, rev: nextRev, updatedAt: now } })
+})
+
+app.delete('/api/v1/exercises/:id', requireAuth, async (c) => {
+  const userId = c.get('userId')
+  const now = new Date().toISOString()
+  const existing = await c.env.gymbro_db
+    .prepare(
+      'SELECT * FROM exercises WHERE id = ? AND owner_user_id = ? AND is_builtin = 0',
+    )
+    .bind(c.req.param('id'), userId)
+    .first<ExerciseRow>()
+
+  if (!existing) {
+    return c.json({ ok: false, error: 'not_found', message: 'El ejercicio no existe.' }, 404)
+  }
+
+  const nextRev = existing.rev + 1
+  await c.env.gymbro_db
+    .prepare(
+      'UPDATE exercises SET archived_at = ?, rev = ?, updated_at = ? WHERE id = ? AND owner_user_id = ?',
+    )
+    .bind(now, nextRev, now, existing.id, userId)
+    .run()
+
+  return c.json({ ok: true, rev: nextRev })
+})
+
+app.get('/api/v1/routines', requireAuth, async (c) => {
+  const userId = c.get('userId')
+  const rows = await c.env.gymbro_db
+    .prepare(
+      `SELECT id
+       FROM routines
+       WHERE user_id = ? AND status = 'active'
+       ORDER BY updated_at DESC`,
+    )
+    .bind(userId)
+    .all<{ id: string }>()
+
+  const routines = []
+  for (const row of rows.results ?? []) {
+    const routine = await getRoutineAggregate(c.env.gymbro_db, userId, row.id)
+    if (routine) routines.push(routine)
+  }
+
+  return c.json({ ok: true, routines })
+})
+
+app.get('/api/v1/routines/:id', requireAuth, async (c) => {
+  const routine = await getRoutineAggregate(
+    c.env.gymbro_db,
+    c.get('userId'),
+    c.req.param('id'),
+  )
+
+  if (!routine) {
+    return c.json({ ok: false, error: 'not_found', message: 'La rutina no existe.' }, 404)
+  }
+
+  return c.json({ ok: true, routine })
+})
+
+app.post('/api/v1/routines', requireAuth, async (c) => {
+  const input = await c.req.json<unknown>().catch(() => null)
+
+  if (!validateRoutine(input)) {
+    return c.json({ ok: false, error: 'invalid_routine', message: 'La rutina no es válida.' }, 400)
+  }
+
+  const userId = c.get('userId')
+  const owner = await c.env.gymbro_db
+    .prepare('SELECT user_id FROM routines WHERE id = ?')
+    .bind(input.id)
+    .first<{ user_id: string }>()
+
+  if (owner) {
+    return c.json({ ok: false, error: 'routine_exists', message: 'La rutina ya existe.' }, 409)
+  }
+
+  const rev = await replaceRoutineAggregate(c.env.gymbro_db, userId, input, null)
+  const routine = await getRoutineAggregate(c.env.gymbro_db, userId, input.id)
+  return c.json({ ok: true, routine: { ...routine, rev } }, 201)
+})
+
+app.put('/api/v1/routines/:id', requireAuth, async (c) => {
+  const input = await c.req.json<unknown>().catch(() => null)
+
+  if (!validateRoutine(input) || input.id !== c.req.param('id')) {
+    return c.json({ ok: false, error: 'invalid_routine', message: 'La rutina no es válida.' }, 400)
+  }
+
+  const userId = c.get('userId')
+  const existing = await c.env.gymbro_db
+    .prepare('SELECT rev FROM routines WHERE id = ? AND user_id = ?')
+    .bind(input.id, userId)
+    .first<{ rev: number }>()
+
+  if (!existing) {
+    return c.json({ ok: false, error: 'not_found', message: 'La rutina no existe.' }, 404)
+  }
+
+  const rev = await replaceRoutineAggregate(
+    c.env.gymbro_db,
+    userId,
+    input,
+    existing.rev,
+  )
+  const routine = await getRoutineAggregate(c.env.gymbro_db, userId, input.id)
+  return c.json({ ok: true, routine: { ...routine, rev } })
+})
+
+app.delete('/api/v1/routines/:id', requireAuth, async (c) => {
+  const userId = c.get('userId')
+  const existing = await c.env.gymbro_db
+    .prepare('SELECT rev FROM routines WHERE id = ? AND user_id = ?')
+    .bind(c.req.param('id'), userId)
+    .first<{ rev: number }>()
+
+  if (!existing) {
+    return c.json({ ok: false, error: 'not_found', message: 'La rutina no existe.' }, 404)
+  }
+
+  const nextRev = existing.rev + 1
+  await c.env.gymbro_db
+    .prepare(
+      `UPDATE routines
+       SET status = 'archived', rev = ?, updated_at = ?
+       WHERE id = ? AND user_id = ?`,
+    )
+    .bind(nextRev, new Date().toISOString(), c.req.param('id'), userId)
+    .run()
+
+  return c.json({ ok: true, rev: nextRev })
 })
 
 app.post('/api/v1/sync/push', requireAuth, async (c) => {
