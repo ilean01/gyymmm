@@ -98,6 +98,8 @@ app.use(
       'https://ilean01.github.io',
       'http://localhost:5173',
       'http://127.0.0.1:5173',
+      'http://localhost:4173',
+      'http://127.0.0.1:4173',
     ],
     allowMethods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowHeaders: ['Content-Type', 'Authorization'],
@@ -692,7 +694,7 @@ app.get('/api/v1/sync/status', async (c) => {
   })
 })
 
-app.put('/api/v1/workout-sessions/:id', async (c) => {
+app.put('/api/v1/workout-sessions/:id', requireAuth, async (c) => {
   const input = await c.req.json<unknown>().catch(() => null)
 
   if (!validateSession(input) || input.id !== c.req.param('id')) {
@@ -706,7 +708,24 @@ app.put('/api/v1/workout-sessions/:id', async (c) => {
     )
   }
 
+  const userId = c.get('userId')
   const profileId = input.profileId ?? 'default'
+
+  const existing = await c.env.gymbro_db
+    .prepare('SELECT user_id FROM workout_sessions WHERE id = ?')
+    .bind(input.id)
+    .first<{ user_id: string | null }>()
+
+  if (existing && existing.user_id !== userId) {
+    return c.json(
+      {
+        ok: false,
+        error: 'not_found',
+        message: 'El entrenamiento no existe.',
+      },
+      404,
+    )
+  }
 
   await c.env.gymbro_db
     .prepare(
@@ -717,8 +736,9 @@ app.put('/api/v1/workout-sessions/:id', async (c) => {
         started_at,
         completed_at,
         status,
-        updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?)
+        updated_at,
+        user_id
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
         profile_id = excluded.profile_id,
         routine_name = excluded.routine_name,
@@ -726,7 +746,8 @@ app.put('/api/v1/workout-sessions/:id', async (c) => {
         completed_at = excluded.completed_at,
         status = excluded.status,
         updated_at = excluded.updated_at
-      WHERE excluded.updated_at >= workout_sessions.updated_at`,
+      WHERE workout_sessions.user_id = excluded.user_id
+        AND excluded.updated_at >= workout_sessions.updated_at`,
     )
     .bind(
       input.id,
@@ -736,12 +757,15 @@ app.put('/api/v1/workout-sessions/:id', async (c) => {
       input.completedAt,
       input.status,
       input.updatedAt,
+      userId,
     )
     .run()
 
   const row = await c.env.gymbro_db
-    .prepare('SELECT * FROM workout_sessions WHERE id = ?')
-    .bind(input.id)
+    .prepare(
+      'SELECT * FROM workout_sessions WHERE id = ? AND user_id = ?',
+    )
+    .bind(input.id, userId)
     .first<WorkoutSessionRow>()
 
   return c.json({
@@ -750,7 +774,8 @@ app.put('/api/v1/workout-sessions/:id', async (c) => {
   })
 })
 
-app.get('/api/v1/workout-sessions', async (c) => {
+app.get('/api/v1/workout-sessions', requireAuth, async (c) => {
+  const userId = c.get('userId')
   const profileId = c.req.query('profileId') || 'default'
   const since = c.req.query('since')
 
@@ -759,18 +784,21 @@ app.get('/api/v1/workout-sessions', async (c) => {
         .prepare(
           `SELECT *
            FROM workout_sessions
-           WHERE profile_id = ? AND updated_at > ?
+           WHERE user_id = ?
+             AND profile_id = ?
+             AND updated_at > ?
            ORDER BY updated_at ASC`,
         )
-        .bind(profileId, since)
+        .bind(userId, profileId, since)
     : c.env.gymbro_db
         .prepare(
           `SELECT *
            FROM workout_sessions
-           WHERE profile_id = ?
+           WHERE user_id = ?
+             AND profile_id = ?
            ORDER BY updated_at ASC`,
         )
-        .bind(profileId)
+        .bind(userId, profileId)
 
   const result = await statement.all<WorkoutSessionRow>()
 
@@ -780,7 +808,7 @@ app.get('/api/v1/workout-sessions', async (c) => {
   })
 })
 
-app.put('/api/v1/workout-sets/:id', async (c) => {
+app.put('/api/v1/workout-sets/:id', requireAuth, async (c) => {
   const input = await c.req.json<unknown>().catch(() => null)
 
   if (!validateSet(input) || input.id !== c.req.param('id')) {
@@ -794,9 +822,13 @@ app.put('/api/v1/workout-sets/:id', async (c) => {
     )
   }
 
+  const userId = c.get('userId')
+
   const session = await c.env.gymbro_db
-    .prepare('SELECT id FROM workout_sessions WHERE id = ?')
-    .bind(input.sessionId)
+    .prepare(
+      'SELECT id FROM workout_sessions WHERE id = ? AND user_id = ?',
+    )
+    .bind(input.sessionId, userId)
     .first<{ id: string }>()
 
   if (!session) {
@@ -805,9 +837,25 @@ app.put('/api/v1/workout-sets/:id', async (c) => {
         ok: false,
         error: 'session_not_found',
         message:
-          'La sesión del entrenamiento debe existir antes de guardar sus series.',
+          'La sesión del entrenamiento no existe o no pertenece a este usuario.',
       },
       409,
+    )
+  }
+
+  const existing = await c.env.gymbro_db
+    .prepare('SELECT user_id FROM workout_sets WHERE id = ?')
+    .bind(input.id)
+    .first<{ user_id: string | null }>()
+
+  if (existing && existing.user_id !== userId) {
+    return c.json(
+      {
+        ok: false,
+        error: 'not_found',
+        message: 'La serie no existe.',
+      },
+      404,
     )
   }
 
@@ -825,8 +873,9 @@ app.put('/api/v1/workout-sets/:id', async (c) => {
         weight_kg,
         reps,
         completed_at,
-        updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        updated_at,
+        user_id
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
         profile_id = excluded.profile_id,
         session_id = excluded.session_id,
@@ -837,7 +886,8 @@ app.put('/api/v1/workout-sets/:id', async (c) => {
         reps = excluded.reps,
         completed_at = excluded.completed_at,
         updated_at = excluded.updated_at
-      WHERE excluded.updated_at >= workout_sets.updated_at`,
+      WHERE workout_sets.user_id = excluded.user_id
+        AND excluded.updated_at >= workout_sets.updated_at`,
     )
     .bind(
       input.id,
@@ -850,12 +900,15 @@ app.put('/api/v1/workout-sets/:id', async (c) => {
       input.reps,
       input.completedAt,
       input.updatedAt,
+      userId,
     )
     .run()
 
   const row = await c.env.gymbro_db
-    .prepare('SELECT * FROM workout_sets WHERE id = ?')
-    .bind(input.id)
+    .prepare(
+      'SELECT * FROM workout_sets WHERE id = ? AND user_id = ?',
+    )
+    .bind(input.id, userId)
     .first<WorkoutSetRow>()
 
   return c.json({
@@ -864,7 +917,8 @@ app.put('/api/v1/workout-sets/:id', async (c) => {
   })
 })
 
-app.get('/api/v1/workout-sets', async (c) => {
+app.get('/api/v1/workout-sets', requireAuth, async (c) => {
+  const userId = c.get('userId')
   const profileId = c.req.query('profileId') || 'default'
   const since = c.req.query('since')
 
@@ -873,18 +927,21 @@ app.get('/api/v1/workout-sets', async (c) => {
         .prepare(
           `SELECT *
            FROM workout_sets
-           WHERE profile_id = ? AND updated_at > ?
+           WHERE user_id = ?
+             AND profile_id = ?
+             AND updated_at > ?
            ORDER BY updated_at ASC`,
         )
-        .bind(profileId, since)
+        .bind(userId, profileId, since)
     : c.env.gymbro_db
         .prepare(
           `SELECT *
            FROM workout_sets
-           WHERE profile_id = ?
+           WHERE user_id = ?
+             AND profile_id = ?
            ORDER BY updated_at ASC`,
         )
-        .bind(profileId)
+        .bind(userId, profileId)
 
   const result = await statement.all<WorkoutSetRow>()
 
