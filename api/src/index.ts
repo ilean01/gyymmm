@@ -1,9 +1,9 @@
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
-import { validateRegisterInput } from './lib/auth'
+import { validateLoginInput, validateRegisterInput } from './lib/auth'
 import { createUuid } from './lib/ids'
 import { JWT_DEFAULT_TTL_SECONDS, signJwt } from './lib/jwt'
-import { hashPassword } from './lib/passwords'
+import { hashPassword, verifyPassword } from './lib/passwords'
 
 type D1RunResult = {
   success?: boolean
@@ -337,6 +337,137 @@ app.post('/api/v1/auth/register', async (c) => {
     },
     201,
   )
+})
+
+app.post('/api/v1/auth/login', async (c) => {
+  const input = await c.req.json<unknown>().catch(() => null)
+  const validation = validateLoginInput(input)
+
+  if (!validation.ok) {
+    return c.json(
+      {
+        ok: false,
+        error: 'invalid_login',
+        message: validation.message,
+      },
+      400,
+    )
+  }
+
+  const { email, password } = validation.value
+
+  const user = await c.env.gymbro_db
+    .prepare(
+      `SELECT
+        id,
+        email,
+        password_hash,
+        password_salt,
+        password_iterations
+      FROM users
+      WHERE email = ? COLLATE NOCASE`,
+    )
+    .bind(email)
+    .first<{
+      id: string
+      email: string
+      password_hash: string
+      password_salt: string
+      password_iterations: number
+    }>()
+
+  if (!user) {
+    return c.json(
+      {
+        ok: false,
+        error: 'invalid_credentials',
+        message: 'Email o contraseña incorrectos.',
+      },
+      401,
+    )
+  }
+
+  const passwordMatches = await verifyPassword(
+    password,
+    user.password_hash,
+    user.password_salt,
+    user.password_iterations,
+  )
+
+  if (!passwordMatches) {
+    return c.json(
+      {
+        ok: false,
+        error: 'invalid_credentials',
+        message: 'Email o contraseña incorrectos.',
+      },
+      401,
+    )
+  }
+
+  const sessionId = createUuid()
+  const now = new Date()
+  const expiresAt = new Date(
+    now.getTime() + JWT_DEFAULT_TTL_SECONDS * 1000,
+  ).toISOString()
+
+  await c.env.gymbro_db
+    .prepare(
+      `INSERT INTO auth_sessions (
+        id,
+        user_id,
+        created_at,
+        expires_at,
+        revoked_at
+      ) VALUES (?, ?, ?, ?, NULL)`,
+    )
+    .bind(
+      sessionId,
+      user.id,
+      now.toISOString(),
+      expiresAt,
+    )
+    .run()
+
+  const profile = await c.env.gymbro_db
+    .prepare(
+      `SELECT
+        user_id,
+        display_name,
+        timezone
+      FROM user_profiles
+      WHERE user_id = ?`,
+    )
+    .bind(user.id)
+    .first<{
+      user_id: string
+      display_name: string | null
+      timezone: string
+    }>()
+
+  const accessToken = await signJwt(c.env.JWT_SECRET, {
+    sub: user.id,
+    sid: sessionId,
+    expiresInSeconds: JWT_DEFAULT_TTL_SECONDS,
+  })
+
+  return c.json({
+    ok: true,
+    accessToken,
+    tokenType: 'Bearer',
+    expiresIn: JWT_DEFAULT_TTL_SECONDS,
+    user: {
+      id: user.id,
+      email: user.email,
+    },
+    profile: profile
+      ? {
+          userId: profile.user_id,
+          displayName: profile.display_name,
+          timezone: profile.timezone,
+        }
+      : null,
+  })
 })
 
 app.get('/api/v1/sync/status', async (c) => {
