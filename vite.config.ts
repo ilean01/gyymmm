@@ -61,7 +61,7 @@ export default defineConfig({
         runtimeCaching: [
           {
             urlPattern: ({ request, url }) =>
-              url.origin === self.location.origin &&
+              (url.hostname === 'ilean01.github.io' || url.hostname === 'localhost') &&
               request.destination === 'image',
             handler: 'CacheFirst',
             options: {
@@ -77,7 +77,7 @@ export default defineConfig({
           },
           {
             urlPattern: ({ request, url }) =>
-              url.origin === self.location.origin &&
+              (url.hostname === 'ilean01.github.io' || url.hostname === 'localhost') &&
               request.destination === 'font',
             handler: 'CacheFirst',
             options: {
@@ -93,7 +93,7 @@ export default defineConfig({
           },
           {
             urlPattern: ({ request, url }) =>
-              url.origin === self.location.origin &&
+              (url.hostname === 'ilean01.github.io' || url.hostname === 'localhost') &&
               (request.destination === 'style' ||
                 request.destination === 'script'),
             handler: 'StaleWhileRevalidate',
