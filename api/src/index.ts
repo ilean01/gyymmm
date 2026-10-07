@@ -2563,6 +2563,7 @@ app.get('/api/v1/sync/pull', requireAuth, async (c) => {
            FROM workout_sets
            WHERE user_id = ?
              AND deleted_at IS NULL
+             AND workout_exercise_id IS NULL
            ORDER BY updated_at ASC`,
         )
         .bind(userId)
