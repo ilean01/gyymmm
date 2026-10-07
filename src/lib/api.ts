@@ -3,6 +3,7 @@ import {
   getAuthSession,
   saveAuthSession,
 } from './auth-session'
+import { saveLocalProfile } from './db'
 import type {
   AuthMeResponse,
   AuthResponse,
@@ -126,6 +127,7 @@ export async function registerAccount(input: {
   )
 
   saveAuthSession(response)
+  await saveLocalProfile(response.user, response.profile)
   return response
 }
 
@@ -143,6 +145,7 @@ export async function loginAccount(input: {
   )
 
   saveAuthSession(response)
+  await saveLocalProfile(response.user, response.profile)
   return response
 }
 
@@ -159,6 +162,8 @@ export async function logoutAccount(): Promise<void> {
   }
 }
 
-export function getCurrentAccount(): Promise<AuthMeResponse> {
-  return apiRequest<AuthMeResponse>('/api/v1/auth/me')
+export async function getCurrentAccount(): Promise<AuthMeResponse> {
+  const response = await apiRequest<AuthMeResponse>('/api/v1/auth/me')
+  await saveLocalProfile(response.user, response.profile)
+  return response
 }
