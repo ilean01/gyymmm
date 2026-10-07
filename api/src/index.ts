@@ -49,6 +49,7 @@ type WorkoutSessionInput = {
   completedAt: string | null
   status: 'active' | 'completed'
   updatedAt: string
+  rev?: number
 }
 
 type WorkoutSetInput = {
@@ -62,6 +63,19 @@ type WorkoutSetInput = {
   reps: number
   completedAt: string
   updatedAt: string
+  rev?: number
+}
+
+type SyncEntityType = 'workoutSession' | 'workoutSet'
+type SyncOperation = 'upsert' | 'delete'
+
+type SyncMutationInput = {
+  mutationId: string
+  entityType: SyncEntityType
+  entityId: string
+  operation: SyncOperation
+  payload: WorkoutSessionInput | WorkoutSetInput | null
+  baseRev: number
 }
 
 type WorkoutSessionRow = {
@@ -73,6 +87,9 @@ type WorkoutSessionRow = {
   status: 'active' | 'completed'
   updated_at: string
   created_at: string
+  user_id: string | null
+  rev: number
+  deleted_at: string | null
 }
 
 type WorkoutSetRow = {
@@ -87,6 +104,9 @@ type WorkoutSetRow = {
   completed_at: string
   updated_at: string
   created_at: string
+  user_id: string | null
+  rev: number
+  deleted_at: string | null
 }
 
 const app = new Hono<AppEnv>()
@@ -206,7 +226,11 @@ function validateSession(input: unknown): input is WorkoutSessionInput {
     (value.completedAt === null || isIsoDate(value.completedAt)) &&
     (value.status === 'active' || value.status === 'completed') &&
     isIsoDate(value.updatedAt) &&
-    (value.profileId === undefined || isNonEmptyString(value.profileId))
+    (value.profileId === undefined || isNonEmptyString(value.profileId)) &&
+    (value.rev === undefined ||
+      (typeof value.rev === 'number' &&
+        Number.isInteger(value.rev) &&
+        value.rev >= 0))
   )
 }
 
@@ -231,7 +255,11 @@ function validateSet(input: unknown): input is WorkoutSetInput {
     value.reps > 0 &&
     isIsoDate(value.completedAt) &&
     isIsoDate(value.updatedAt) &&
-    (value.profileId === undefined || isNonEmptyString(value.profileId))
+    (value.profileId === undefined || isNonEmptyString(value.profileId)) &&
+    (value.rev === undefined ||
+      (typeof value.rev === 'number' &&
+        Number.isInteger(value.rev) &&
+        value.rev >= 0))
   )
 }
 
@@ -245,6 +273,7 @@ function sessionRowToApi(row: WorkoutSessionRow) {
     status: row.status,
     updatedAt: row.updated_at,
     createdAt: row.created_at,
+    rev: row.rev,
   }
 }
 
@@ -261,7 +290,32 @@ function setRowToApi(row: WorkoutSetRow) {
     completedAt: row.completed_at,
     updatedAt: row.updated_at,
     createdAt: row.created_at,
+    rev: row.rev,
   }
+}
+
+function isSyncMutation(value: unknown): value is SyncMutationInput {
+  if (!value || typeof value !== 'object') {
+    return false
+  }
+
+  const mutation = value as Record<string, unknown>
+
+  return (
+    isNonEmptyString(mutation.mutationId) &&
+    (mutation.entityType === 'workoutSession' ||
+      mutation.entityType === 'workoutSet') &&
+    isNonEmptyString(mutation.entityId) &&
+    (mutation.operation === 'upsert' ||
+      mutation.operation === 'delete') &&
+    typeof mutation.baseRev === 'number' &&
+    Number.isInteger(mutation.baseRev) &&
+    mutation.baseRev >= 0 &&
+    (mutation.operation === 'delete' ||
+      (mutation.entityType === 'workoutSession'
+        ? validateSession(mutation.payload)
+        : validateSet(mutation.payload)))
+  )
 }
 
 app.get('/', (c) =>
