@@ -8,13 +8,18 @@ import {
   getSyncQueue,
 } from '../lib/db'
 import {
+  getActiveWorkoutSession,
   getRoutines,
   seedOfflineDomainData,
   startWorkoutFromRoutine,
 } from '../lib/domain-db'
 import { syncPendingChanges } from '../lib/sync'
 import type { Routine } from '../types/domain'
-import type { SyncConflict, SyncQueueItem } from '../types/training'
+import type {
+  SyncConflict,
+  SyncQueueItem,
+  WorkoutSession,
+} from '../types/training'
 
 const weekdayLabels = [
   'domingo',
@@ -29,6 +34,8 @@ const weekdayLabels = [
 export function TodayPage() {
   const navigate = useNavigate()
   const [routines, setRoutines] = useState<Routine[]>([])
+  const [activeSession, setActiveSession] =
+    useState<WorkoutSession | null>(null)
   const [queue, setQueue] = useState<SyncQueueItem[]>([])
   const [conflicts, setConflicts] = useState<SyncConflict[]>([])
   const [displayName, setDisplayName] = useState<string | null>(null)
@@ -39,15 +46,22 @@ export function TodayPage() {
   async function refresh() {
     await seedOfflineDomainData()
 
-    const [localRoutines, localQueue, localConflicts, profile] =
-      await Promise.all([
-        getRoutines(),
-        getSyncQueue(),
-        getSyncConflicts(),
-        getLocalProfile(),
-      ])
+    const [
+      localRoutines,
+      localActiveSession,
+      localQueue,
+      localConflicts,
+      profile,
+    ] = await Promise.all([
+      getRoutines(),
+      getActiveWorkoutSession(),
+      getSyncQueue(),
+      getSyncConflicts(),
+      getLocalProfile(),
+    ])
 
     setRoutines(localRoutines)
+    setActiveSession(localActiveSession ?? null)
     setQueue(localQueue)
     setConflicts(localConflicts)
     setDisplayName(profile?.displayName ?? null)
@@ -175,6 +189,44 @@ export function TodayPage() {
         {displayName ? `Hola, ${displayName}` : 'Hoy'}
       </h1>
 
+      {activeSession && (
+        <Card className="mt-6 border-gym-accent">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <p className="text-sm text-gym-muted">
+                Entrenamiento en curso
+              </p>
+              <h2 className="font-display mt-1 text-4xl font-bold uppercase">
+                {activeSession.routineName}
+              </h2>
+              <p className="mt-2 text-sm text-gym-muted">
+                Iniciado{' '}
+                {new Date(activeSession.startedAt).toLocaleTimeString(
+                  'es-PY',
+                  {
+                    hour: '2-digit',
+                    minute: '2-digit',
+                  },
+                )}
+                . Podés continuar exactamente donde quedaste.
+              </p>
+            </div>
+            <Badge tone="warning">Activo</Badge>
+          </div>
+
+          <Button
+            type="button"
+            fullWidth
+            className="mt-5"
+            onClick={() =>
+              navigate('/workout/' + activeSession.id)
+            }
+          >
+            Continuar entrenamiento
+          </Button>
+        </Card>
+      )}
+
       <p className="mt-4 text-gym-muted">
         {todaysRoutine
           ? todaysRoutine.weekdays.includes(weekday)
@@ -205,8 +257,11 @@ export function TodayPage() {
             fullWidth
             className="mt-5"
             onClick={() => void handleStart()}
+            disabled={Boolean(activeSession)}
           >
-            Iniciar entrenamiento
+            {activeSession
+              ? 'Ya hay un entrenamiento activo'
+              : 'Iniciar entrenamiento'}
           </Button>
         </Card>
       ) : (
