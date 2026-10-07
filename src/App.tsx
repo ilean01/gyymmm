@@ -7,6 +7,7 @@ import {
   useNavigate,
 } from 'react-router-dom'
 import { AppShell } from './components/layout/AppShell'
+import { SyncHeartbeat } from './components/sync/SyncHeartbeat'
 import { DesktopSidebar } from './components/navigation/DesktopSidebar'
 import {
   MobileBottomNav,
@@ -72,6 +73,7 @@ function PrivateAppLayout() {
         />
       }
     >
+      <SyncHeartbeat />
       <Outlet />
     </AppShell>
   )
