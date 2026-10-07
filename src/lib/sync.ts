@@ -1,4 +1,4 @@
-import { apiRequest } from './api'
+import { ApiError, apiRequest } from './api'
 import { getAuthSession } from './auth-session'
 import {
   getSyncQueue,
@@ -152,6 +152,11 @@ async function runSync(): Promise<SyncSummary> {
       await markSyncSuccess(item)
       summary.synced += 1
     } catch (error) {
+      if (error instanceof ApiError && error.status === 401) {
+        summary.failed += 1
+        break
+      }
+
       const message =
         error instanceof Error
           ? error.message
