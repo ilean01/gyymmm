@@ -1,5 +1,7 @@
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
+import { createUuid } from './lib/ids'
+import { signJwt, verifyJwt } from './lib/jwt'
 
 type D1RunResult = {
   success?: boolean
@@ -22,6 +24,7 @@ type D1DatabaseBinding = {
 
 type Bindings = {
   gymbro_db: D1DatabaseBinding
+  JWT_SECRET: string
 }
 
 type WorkoutSessionInput = {
@@ -414,6 +417,82 @@ app.get('/api/v1/workout-sets', async (c) => {
   return c.json({
     ok: true,
     sets: (result.results ?? []).map(setRowToApi),
+  })
+})
+
+app.get('/api/v1/dev/jwt-selftest', async (c) => {
+  const hostname = new URL(c.req.url).hostname
+
+  if (hostname !== 'localhost' && hostname !== '127.0.0.1') {
+    return c.json(
+      {
+        ok: false,
+        error: 'not_found',
+        message: 'La ruta solicitada no existe en GymBro API.',
+      },
+      404,
+    )
+  }
+
+  const userId = createUuid()
+  const sessionId = createUuid()
+
+  const token = await signJwt(c.env.JWT_SECRET, {
+    sub: userId,
+    sid: sessionId,
+    expiresInSeconds: 300,
+  })
+
+  const validResult = await verifyJwt(c.env.JWT_SECRET, token)
+
+  const tokenParts = token.split('.')
+  const tamperedToken = `${tokenParts[0]}.${tokenParts[1]}.${tokenParts[2].slice(0, -1)}A`
+  const tamperedResult = await verifyJwt(
+    c.env.JWT_SECRET,
+    tamperedToken,
+  )
+
+  const expiredToken = await signJwt(c.env.JWT_SECRET, {
+    sub: userId,
+    sid: sessionId,
+    issuedAtSeconds: 1,
+    expiresInSeconds: 1,
+  })
+  const expiredResult = await verifyJwt(
+    c.env.JWT_SECRET,
+    expiredToken,
+    3,
+  )
+
+  const claimsValid =
+    validResult.ok &&
+    validResult.payload.sub === userId &&
+    validResult.payload.sid === sessionId &&
+    validResult.payload.exp > validResult.payload.iat
+
+  const tamperedRejected =
+    !tamperedResult.ok &&
+    tamperedResult.reason === 'invalid_signature'
+
+  const expiredRejected =
+    !expiredResult.ok &&
+    expiredResult.reason === 'expired'
+
+  return c.json({
+    ok: claimsValid && tamperedRejected && expiredRejected,
+    checks: {
+      claimsValid,
+      tamperedRejected,
+      expiredRejected,
+    },
+    claims: validResult.ok
+      ? {
+          sub: validResult.payload.sub,
+          sid: validResult.payload.sid,
+          iat: validResult.payload.iat,
+          exp: validResult.payload.exp,
+        }
+      : null,
   })
 })
 
