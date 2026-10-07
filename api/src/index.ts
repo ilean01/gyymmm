@@ -1,5 +1,6 @@
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
+import { hashPassword, verifyPassword } from './lib/passwords'
 
 type D1RunResult = {
   success?: boolean
@@ -414,6 +415,61 @@ app.get('/api/v1/workout-sets', async (c) => {
   return c.json({
     ok: true,
     sets: (result.results ?? []).map(setRowToApi),
+  })
+})
+
+app.get('/api/v1/dev/pbkdf2-benchmark', async (c) => {
+  const hostname = new URL(c.req.url).hostname
+
+  if (hostname !== 'localhost' && hostname !== '127.0.0.1') {
+    return c.json(
+      {
+        ok: false,
+        error: 'not_found',
+        message: 'La ruta solicitada no existe en GymBro API.',
+      },
+      404,
+    )
+  }
+
+  const requestedIterations = Number(c.req.query('iterations') ?? '100000')
+
+  if (
+    !Number.isInteger(requestedIterations) ||
+    requestedIterations < 10_000 ||
+    requestedIterations > 600_000
+  ) {
+    return c.json(
+      {
+        ok: false,
+        error: 'invalid_iterations',
+        message: 'Usá un valor entre 10000 y 600000 iteraciones.',
+      },
+      400,
+    )
+  }
+
+  const password = 'GymBro benchmark password'
+
+  const hashStartedAt = performance.now()
+  const hashed = await hashPassword(password, requestedIterations)
+  const hashMs = performance.now() - hashStartedAt
+
+  const verifyStartedAt = performance.now()
+  const valid = await verifyPassword(
+    password,
+    hashed.hash,
+    hashed.salt,
+    hashed.iterations,
+  )
+  const verifyMs = performance.now() - verifyStartedAt
+
+  return c.json({
+    ok: valid,
+    iterations: requestedIterations,
+    hashMs: Math.round(hashMs * 100) / 100,
+    verifyMs: Math.round(verifyMs * 100) / 100,
+    totalMs: Math.round((hashMs + verifyMs) * 100) / 100,
   })
 })
 
