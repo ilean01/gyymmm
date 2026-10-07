@@ -2014,6 +2014,7 @@ app.put('/api/v1/workout-plan-sets/:id', requireAuth, async (c) => {
              set_number = ?,
              target_weight_kg = ?,
              target_reps = ?,
+             target_seconds = ?,
              duration_seconds = ?,
              weight_kg = ?,
              reps = ?,
@@ -2030,6 +2031,7 @@ app.put('/api/v1/workout-plan-sets/:id', requireAuth, async (c) => {
         input.targetWeightKg,
         input.targetReps,
         input.targetSeconds,
+        input.durationSeconds,
         input.actualWeightKg,
         input.actualReps,
         input.completedAt,
@@ -2057,10 +2059,11 @@ app.put('/api/v1/workout-plan-sets/:id', requireAuth, async (c) => {
           workout_exercise_id,
           target_weight_kg,
           target_reps,
+          target_seconds,
           duration_seconds,
           rev,
           deleted_at
-        ) VALUES (?, 'default', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`,
+        ) VALUES (?, 'default', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`,
       )
       .bind(
         input.id,
@@ -2077,6 +2080,7 @@ app.put('/api/v1/workout-plan-sets/:id', requireAuth, async (c) => {
         input.targetWeightKg,
         input.targetReps,
         input.targetSeconds,
+        input.durationSeconds,
         nextRev,
       )
       .run()
