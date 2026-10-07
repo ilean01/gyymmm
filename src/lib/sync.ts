@@ -1,5 +1,6 @@
 import { ApiError, apiRequest } from './api'
 import { getAuthSession } from './auth-session'
+import { syncDomainOutbox } from './domain-sync'
 import {
   applyRemoteSyncChanges,
   getSyncMetadata,
@@ -277,6 +278,11 @@ async function runSync(): Promise<SyncSummary> {
   }
 
   const queue = orderedQueue(await getSyncQueue())
+  const workoutQueue = queue.filter(
+    (item) =>
+      item.entityType === 'workoutSession' ||
+      item.entityType === 'workoutSet',
+  )
   const summary: SyncSummary = {
     attempted: queue.length,
     synced: 0,
@@ -287,10 +293,14 @@ async function runSync(): Promise<SyncSummary> {
   }
 
   try {
-    const pushed = await pushPendingChanges(queue)
-    summary.synced = pushed.synced
-    summary.failed = pushed.failed
-    summary.conflicts = pushed.conflicts
+    const domain = await syncDomainOutbox(queue)
+    summary.synced += domain.synced
+    summary.failed += domain.failed
+
+    const pushed = await pushPendingChanges(workoutQueue)
+    summary.synced += pushed.synced
+    summary.failed += pushed.failed
+    summary.conflicts += pushed.conflicts
 
     const pulled = await pullRemoteChanges()
     summary.downloadedSessions = pulled.downloadedSessions
