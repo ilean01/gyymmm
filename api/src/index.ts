@@ -98,6 +98,39 @@ type ExerciseRow = {
   updated_at: string
 }
 
+type WorkoutExerciseSnapshotInput = {
+  id: string
+  sessionId: string
+  sourceRoutineExerciseId: string | null
+  exerciseId: string
+  exerciseName: string
+  position: number
+  status: 'pending' | 'active' | 'completed' | 'skipped'
+  notes: string | null
+  restSeconds: number | null
+  replacedExerciseId: string | null
+  rev?: number
+  updatedAt: string
+}
+
+type WorkoutPlanSetInput = {
+  id: string
+  sessionId: string
+  workoutExerciseId: string
+  exerciseId: string
+  exerciseName: string
+  setNumber: number
+  targetWeightKg: number | null
+  targetReps: number | null
+  targetSeconds: number | null
+  actualWeightKg: number | null
+  actualReps: number | null
+  durationSeconds: number | null
+  completedAt: string | null
+  rev?: number
+  updatedAt: string
+}
+
 type WorkoutSessionInput = {
   id: string
   profileId?: string
@@ -611,6 +644,72 @@ async function replaceRoutineAggregate(
 
   await db.batch(statements)
   return nextRev
+}
+
+function validateWorkoutExerciseSnapshot(
+  input: unknown,
+): input is WorkoutExerciseSnapshotInput {
+  if (!input || typeof input !== 'object') return false
+  const value = input as Record<string, unknown>
+
+  return (
+    isNonEmptyString(value.id) &&
+    isNonEmptyString(value.sessionId) &&
+    (value.sourceRoutineExerciseId === null ||
+      isNonEmptyString(value.sourceRoutineExerciseId)) &&
+    isNonEmptyString(value.exerciseId) &&
+    isNonEmptyString(value.exerciseName) &&
+    Number.isInteger(value.position) &&
+    Number(value.position) >= 0 &&
+    (value.status === 'pending' ||
+      value.status === 'active' ||
+      value.status === 'completed' ||
+      value.status === 'skipped') &&
+    (value.notes === null || typeof value.notes === 'string') &&
+    (value.restSeconds === null ||
+      (Number.isInteger(value.restSeconds) &&
+        Number(value.restSeconds) >= 0)) &&
+    (value.replacedExerciseId === null ||
+      isNonEmptyString(value.replacedExerciseId)) &&
+    isIsoDate(value.updatedAt)
+  )
+}
+
+function validateWorkoutPlanSet(
+  input: unknown,
+): input is WorkoutPlanSetInput {
+  if (!input || typeof input !== 'object') return false
+  const value = input as Record<string, unknown>
+
+  return (
+    isNonEmptyString(value.id) &&
+    isNonEmptyString(value.sessionId) &&
+    isNonEmptyString(value.workoutExerciseId) &&
+    isNonEmptyString(value.exerciseId) &&
+    isNonEmptyString(value.exerciseName) &&
+    Number.isInteger(value.setNumber) &&
+    Number(value.setNumber) > 0 &&
+    (value.targetWeightKg === null ||
+      (typeof value.targetWeightKg === 'number' &&
+        Number.isFinite(value.targetWeightKg) &&
+        Number(value.targetWeightKg) >= 0)) &&
+    (value.targetReps === null ||
+      (Number.isInteger(value.targetReps) && Number(value.targetReps) > 0)) &&
+    (value.targetSeconds === null ||
+      (Number.isInteger(value.targetSeconds) &&
+        Number(value.targetSeconds) > 0)) &&
+    (value.actualWeightKg === null ||
+      (typeof value.actualWeightKg === 'number' &&
+        Number.isFinite(value.actualWeightKg) &&
+        Number(value.actualWeightKg) >= 0)) &&
+    (value.actualReps === null ||
+      (Number.isInteger(value.actualReps) && Number(value.actualReps) > 0)) &&
+    (value.durationSeconds === null ||
+      (Number.isInteger(value.durationSeconds) &&
+        Number(value.durationSeconds) > 0)) &&
+    (value.completedAt === null || isIsoDate(value.completedAt)) &&
+    isIsoDate(value.updatedAt)
+  )
 }
 
 function validateSession(input: unknown): input is WorkoutSessionInput {
@@ -1734,6 +1833,254 @@ app.delete('/api/v1/routines/:id', requireAuth, async (c) => {
     )
     .bind(nextRev, new Date().toISOString(), c.req.param('id'), userId)
     .run()
+
+  return c.json({ ok: true, rev: nextRev })
+})
+
+app.put('/api/v1/workout-exercises/:id', requireAuth, async (c) => {
+  const input = await c.req.json<unknown>().catch(() => null)
+
+  if (
+    !validateWorkoutExerciseSnapshot(input) ||
+    input.id !== c.req.param('id')
+  ) {
+    return c.json(
+      {
+        ok: false,
+        error: 'invalid_workout_exercise',
+        message: 'El snapshot del ejercicio no es válido.',
+      },
+      400,
+    )
+  }
+
+  const userId = c.get('userId')
+  const session = await c.env.gymbro_db
+    .prepare(
+      'SELECT id FROM workout_sessions WHERE id = ? AND user_id = ?',
+    )
+    .bind(input.sessionId, userId)
+    .first<{ id: string }>()
+
+  if (!session) {
+    return c.json(
+      {
+        ok: false,
+        error: 'session_not_found',
+        message: 'La sesión no existe o no pertenece al usuario.',
+      },
+      404,
+    )
+  }
+
+  const existing = await c.env.gymbro_db
+    .prepare(
+      `SELECT we.rev
+       FROM workout_exercises we
+       JOIN workout_sessions ws ON ws.id = we.session_id
+       WHERE we.id = ? AND ws.user_id = ?`,
+    )
+    .bind(input.id, userId)
+    .first<{ rev: number }>()
+
+  const nextRev = existing ? existing.rev + 1 : 1
+  const now = new Date().toISOString()
+
+  if (existing) {
+    await c.env.gymbro_db
+      .prepare(
+        `UPDATE workout_exercises
+         SET source_routine_exercise_id = ?,
+             exercise_id = ?,
+             exercise_name = ?,
+             position = ?,
+             status = ?,
+             notes = ?,
+             rest_seconds = ?,
+             replaced_exercise_id = ?,
+             rev = ?,
+             updated_at = ?
+         WHERE id = ?`,
+      )
+      .bind(
+        input.sourceRoutineExerciseId,
+        input.exerciseId,
+        input.exerciseName,
+        input.position,
+        input.status,
+        input.notes,
+        input.restSeconds,
+        input.replacedExerciseId,
+        nextRev,
+        now,
+        input.id,
+      )
+      .run()
+  } else {
+    await c.env.gymbro_db
+      .prepare(
+        `INSERT INTO workout_exercises (
+          id,
+          session_id,
+          source_routine_exercise_id,
+          exercise_id,
+          exercise_name,
+          position,
+          status,
+          notes,
+          rest_seconds,
+          replaced_exercise_id,
+          rev,
+          created_at,
+          updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .bind(
+        input.id,
+        input.sessionId,
+        input.sourceRoutineExerciseId,
+        input.exerciseId,
+        input.exerciseName,
+        input.position,
+        input.status,
+        input.notes,
+        input.restSeconds,
+        input.replacedExerciseId,
+        nextRev,
+        now,
+        now,
+      )
+      .run()
+  }
+
+  return c.json({ ok: true, rev: nextRev })
+})
+
+app.put('/api/v1/workout-plan-sets/:id', requireAuth, async (c) => {
+  const input = await c.req.json<unknown>().catch(() => null)
+
+  if (!validateWorkoutPlanSet(input) || input.id !== c.req.param('id')) {
+    return c.json(
+      {
+        ok: false,
+        error: 'invalid_workout_set',
+        message: 'La serie planificada no es válida.',
+      },
+      400,
+    )
+  }
+
+  const userId = c.get('userId')
+  const parent = await c.env.gymbro_db
+    .prepare(
+      `SELECT we.id
+       FROM workout_exercises we
+       JOIN workout_sessions ws ON ws.id = we.session_id
+       WHERE we.id = ?
+         AND we.session_id = ?
+         AND ws.user_id = ?`,
+    )
+    .bind(input.workoutExerciseId, input.sessionId, userId)
+    .first<{ id: string }>()
+
+  if (!parent) {
+    return c.json(
+      {
+        ok: false,
+        error: 'workout_exercise_not_found',
+        message: 'El ejercicio de la sesión todavía no existe.',
+      },
+      409,
+    )
+  }
+
+  const existing = await c.env.gymbro_db
+    .prepare(
+      'SELECT rev FROM workout_sets WHERE id = ? AND user_id = ?',
+    )
+    .bind(input.id, userId)
+    .first<{ rev: number }>()
+
+  const nextRev = existing ? existing.rev + 1 : 1
+  const now = new Date().toISOString()
+
+  if (existing) {
+    await c.env.gymbro_db
+      .prepare(
+        `UPDATE workout_sets
+         SET workout_exercise_id = ?,
+             exercise_id = ?,
+             exercise_name = ?,
+             set_number = ?,
+             target_weight_kg = ?,
+             target_reps = ?,
+             duration_seconds = ?,
+             weight_kg = ?,
+             reps = ?,
+             completed_at = ?,
+             rev = ?,
+             updated_at = ?
+         WHERE id = ? AND user_id = ?`,
+      )
+      .bind(
+        input.workoutExerciseId,
+        input.exerciseId,
+        input.exerciseName,
+        input.setNumber,
+        input.targetWeightKg,
+        input.targetReps,
+        input.targetSeconds,
+        input.actualWeightKg,
+        input.actualReps,
+        input.completedAt,
+        nextRev,
+        now,
+        input.id,
+        userId,
+      )
+      .run()
+  } else {
+    await c.env.gymbro_db
+      .prepare(
+        `INSERT INTO workout_sets (
+          id,
+          profile_id,
+          session_id,
+          exercise_id,
+          exercise_name,
+          set_number,
+          weight_kg,
+          reps,
+          completed_at,
+          updated_at,
+          user_id,
+          workout_exercise_id,
+          target_weight_kg,
+          target_reps,
+          duration_seconds,
+          rev,
+          deleted_at
+        ) VALUES (?, 'default', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`,
+      )
+      .bind(
+        input.id,
+        input.sessionId,
+        input.exerciseId,
+        input.exerciseName,
+        input.setNumber,
+        input.actualWeightKg,
+        input.actualReps,
+        input.completedAt,
+        now,
+        userId,
+        input.workoutExerciseId,
+        input.targetWeightKg,
+        input.targetReps,
+        input.targetSeconds,
+        nextRev,
+      )
+      .run()
+  }
 
   return c.json({ ok: true, rev: nextRev })
 })
