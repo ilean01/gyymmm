@@ -8,6 +8,7 @@ import {
 } from 'react-router-dom'
 import { AppShell } from './components/layout/AppShell'
 import { SyncHeartbeat } from './components/sync/SyncHeartbeat'
+import { GlobalSyncStatus } from './components/system/GlobalSyncStatus'
 import { DesktopSidebar } from './components/navigation/DesktopSidebar'
 import {
   MobileBottomNav,
@@ -22,6 +23,7 @@ import { RoutinesPage } from './pages/RoutinesPage'
 import { TodayPage } from './pages/TodayPage'
 import { WorkoutBootstrapPage } from './pages/WorkoutBootstrapPage'
 import { WorkoutSummaryPage } from './pages/WorkoutSummaryPage'
+import { ProgressPage } from './pages/ProgressPage'
 import { ProtectedRoute } from './router/ProtectedRoute'
 
 const navPaths: Record<MobileNavItemId, string> = {
@@ -59,7 +61,7 @@ function PrivateAppLayout() {
 
   return (
     <AppShell
-      contentWidth="narrow"
+      contentWidth="content"
       mobileNavigation={
         <MobileBottomNav
           activeItem={activeItem}
@@ -74,6 +76,7 @@ function PrivateAppLayout() {
       }
     >
       <SyncHeartbeat />
+      <GlobalSyncStatus />
       <Outlet />
     </AppShell>
   )
@@ -100,15 +103,7 @@ function App() {
         <Route path="/workout/:id/summary" element={<WorkoutSummaryPage />} />
         <Route path="/exercises" element={<ExercisesPage />} />
 
-        <Route
-          path="/progress"
-          element={
-            <PlaceholderPage
-              title="Progreso"
-              description="Historial, volumen, récords y evolución."
-            />
-          }
-        />
+        <Route path="/progress" element={<ProgressPage />} />
 
         <Route
           path="/coach"
