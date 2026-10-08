@@ -54,6 +54,31 @@ jobs:
         working-directory: api
         run: npm run typecheck
 
+      - name: API acceptance and isolation tests
+        run: |
+          printf 'JWT_SECRET=%s\n' "$(openssl rand -hex 48)" > api/.dev.vars
+          cd api
+          npx wrangler d1 migrations apply gymbro-db --local
+          npm run dev -- --port 8787 > ../wrangler-ci.log 2>&1 &
+          echo $! > ../wrangler-ci.pid
+          cd ..
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:8787/health > /dev/null; then
+              break
+            fi
+            sleep 1
+          done
+          curl --fail --silent http://127.0.0.1:8787/health
+          node scripts/api-acceptance.mjs
+
+      - name: Stop local Worker
+        if: always()
+        run: |
+          if [ -f wrangler-ci.pid ]; then
+            kill "$(cat wrangler-ci.pid)" || true
+          fi
+          rm -f api/.dev.vars
+
       - name: Build production frontend
         env:
           VITE_API_URL: https://gymbro-api.ileanasanabria14.workers.dev
