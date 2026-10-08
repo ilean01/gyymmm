@@ -1,244 +1,266 @@
 # GymBro
 
-GymBro es una PWA personal para registrar entrenamientos, rutinas y progreso en el gimnasio. Está diseñada para seguir funcionando sin señal y sincronizar los cambios cuando vuelve Internet.
+GymBro es una PWA personal para registrar rutinas y entrenamientos desde el
+celular o la notebook. La prioridad de la Etapa 1 es que el entrenamiento no
+dependa de tener señal: los cambios se guardan primero en IndexedDB y se
+sincronizan con Cloudflare cuando vuelve Internet.
 
-## Stack
+## Arquitectura
 
-- Frontend: React + Vite + TypeScript + Tailwind CSS.
-- PWA: `vite-plugin-pwa`, Workbox y manifest instalable.
-- Offline: IndexedDB con outbox local y control de revisiones.
-- Backend: Cloudflare Workers + Hono.
-- Base de datos: Cloudflare D1.
-- Producción frontend: GitHub Pages.
-- Autenticación: PBKDF2-HMAC-SHA256 + JWT + sesiones revocables.
+- **Frontend:** React + Vite + TypeScript + Tailwind CSS.
+- **PWA:** `vite-plugin-pwa` + Workbox.
+- **Persistencia local:** IndexedDB.
+- **Backend:** Cloudflare Workers + Hono.
+- **Base remota:** Cloudflare D1.
+- **Autenticación:** PBKDF2-HMAC-SHA256 + JWT + sesiones revocables.
+- **Producción frontend:** GitHub Pages bajo `/gyymmm/`.
+- **Producción API:** Cloudflare Workers.
 
-## URLs
+La cola local usa UUID de mutación, revisiones (`rev`) y cursor de cambios
+para soportar sincronización idempotente, detección de conflictos y varios
+dispositivos.
 
-- Frontend de producción: `https://ilean01.github.io/gyymmm/`
-- API de producción: `https://gymbro-api.ileanasanabria14.workers.dev`
-- Health: `https://gymbro-api.ileanasanabria14.workers.dev/health`
+## Requisitos
 
-## Requisitos locales
-
-- Node.js 24 o compatible.
+- Node.js 24 o compatible con el workflow.
 - npm.
 - Git.
-- Cuenta de Cloudflare autenticada en Wrangler para migraciones/deploy del Worker.
+- Wrangler autenticado para tareas de Cloudflare.
 
-## Ejecutar el frontend
+## Desarrollo local
+
+Desde la raíz:
 
 ```bash
-git clone https://github.com/ilean01/gyymmm.git
-cd gyymmm
 npm ci
 npm run dev
 ```
 
-Vite abre normalmente en `http://localhost:5173/gyymmm/`.
-
-El archivo `.env.development` apunta la PWA local a:
+El frontend queda normalmente en:
 
 ```text
+http://localhost:5173/gyymmm/
+```
+
+En otra terminal:
+
+```bash
+cd api
+npm ci
+cp .dev.vars.example .dev.vars
+```
+
+Reemplazá el valor de `JWT_SECRET` de `.dev.vars` por una clave aleatoria.
+Ese archivo está ignorado por Git.
+
+Generación rápida de una clave local:
+
+```bash
+printf 'JWT_SECRET=%s\n' "$(openssl rand -hex 48)" > .dev.vars
+```
+
+Aplicá las migraciones locales:
+
+```bash
+npx wrangler d1 migrations apply gymbro-db --local
+```
+
+Y levantá el Worker:
+
+```bash
+npm run dev
+```
+
+La API queda normalmente en:
+
+```text
+http://localhost:8787
+```
+
+Comprobación:
+
+```bash
+curl http://localhost:8787/health
+```
+
+## Variables del frontend
+
+Para desarrollo existe `.env.development` con autenticación obligatoria.
+
+El ejemplo general es:
+
+```env
 VITE_API_URL=http://localhost:8787
 VITE_AUTH_REQUIRED=true
 ```
 
-## Ejecutar la API
+Nunca coloques secretos en variables `VITE_*`: Vite las incorpora al bundle
+del navegador.
 
-Primero crear el secreto local a partir del ejemplo:
+## Base de datos D1
 
-```bash
-cd api
-cp .dev.vars.example .dev.vars
-```
+Las migraciones están en `api/migrations`.
 
-Reemplazar el valor de `JWT_SECRET` por una clave aleatoria larga. El archivo `api/.dev.vars` está ignorado por Git y nunca debe subirse.
-
-Luego:
-
-```bash
-npm ci
-npm run typecheck
-npm run dev
-```
-
-La API local queda normalmente en `http://localhost:8787`.
-
-## Migraciones D1
-
-Migraciones locales:
+Aplicar local:
 
 ```bash
 cd api
 npx wrangler d1 migrations apply gymbro-db --local
 ```
 
-Migraciones de producción:
+Aplicar producción:
 
 ```bash
 cd api
 npx wrangler d1 migrations apply gymbro-db --remote
 ```
 
-Las migraciones se mantienen en `api/migrations/`. No editar una migración ya aplicada; agregar una nueva.
+Revisá siempre la lista que Wrangler muestra antes de confirmar una migración
+remota.
 
-## Secreto JWT de producción
+## JWT secret de producción
 
-El secreto real se carga exclusivamente con Wrangler:
+El secreto de producción no debe guardarse en el repositorio ni en
+`wrangler.jsonc`.
+
+Desde `api/`:
 
 ```bash
-cd api
 npx wrangler secret put JWT_SECRET
 ```
 
-No colocar el valor real en `wrangler.jsonc`, archivos `.env`, README, variables `VITE_*` ni commits.
+Pegá una clave aleatoria larga cuando Wrangler la solicite.
 
-## Deploy del Worker
+## Publicar la API
 
-Después de aplicar las migraciones remotas:
+Desde `api/`, después de aplicar migraciones y configurar el secreto:
 
 ```bash
-cd api
 npm run typecheck
-npm run deploy
+npx wrangler deploy
 ```
 
-Verificar después:
+Después verificá:
 
 ```bash
 curl https://gymbro-api.ileanasanabria14.workers.dev/health
 ```
 
-El health check informa si autenticación, D1 y el esquema requerido están listos, pero no expone secretos.
+`/health` devuelve 200 solamente cuando el secreto de autenticación y el
+esquema esperado están listos.
 
-## Deploy del frontend
+## Publicar el frontend
 
-Cada push a `main` ejecuta GitHub Actions. El workflow:
+`.github/workflows/deploy-pages.yml` se ejecuta al hacer push a `main`.
+
+Antes del deploy el workflow:
 
 1. instala frontend y API;
-2. revisa el historial Git por patrones comunes de secretos;
+2. revisa patrones comunes de secretos en el historial;
 3. ejecuta ESLint;
 4. ejecuta typecheck del Worker;
-5. compila el frontend con autenticación obligatoria;
-6. comprueba manifest, service worker e iconos PWA;
-7. genera fallback `404.html` para React Router;
-8. publica en GitHub Pages.
+5. aplica las migraciones en una D1 local temporal;
+6. prueba registro, login, logout, CRUD y aislamiento entre dos usuarios;
+7. compila el frontend con autenticación obligatoria;
+8. verifica manifest, iconos y service worker;
+9. abre la PWA con Chrome headless y falla si hay errores relevantes de
+   consola/red o si el service worker no queda listo;
+10. publica el resultado en GitHub Pages.
 
-No hace falta ejecutar un deploy manual del frontend.
+Producción:
 
-## Validaciones locales
-
-Validación completa del frontend:
-
-```bash
-npm run check
+```text
+https://ilean01.github.io/gyymmm/
 ```
 
-Validar historial por secretos:
+## Comprobaciones locales
+
+Frontend:
 
 ```bash
+npm run lint
+npm run build
+npm run verify:pwa
 npm run check:secrets
 ```
 
-Validar API:
+API:
 
 ```bash
 cd api
 npm run typecheck
 ```
 
-## Arquitectura offline-first
+El smoke test de API se puede ejecutar con el Worker local levantado:
 
-Cuando el usuario modifica un entrenamiento, rutina o ejercicio:
+```bash
+npm run test:api
+```
 
-1. GymBro escribe primero en IndexedDB.
-2. La UI se actualiza inmediatamente.
-3. Se agrega una mutación al outbox local.
-4. Si hay Internet, el heartbeat intenta sincronizar automáticamente.
-5. El servidor aplica la mutación y devuelve la nueva revisión.
-6. La PWA elimina del outbox únicamente la mutación confirmada.
-7. Después descarga los cambios remotos.
+El smoke test de navegador necesita primero un build y `npm run preview`:
 
-La sincronización también se intenta al abrir la app, volver a primer plano y recuperar conexión.
+```bash
+npm run test:browser
+```
 
-## Conflictos
+## Qué está incluido en la Etapa 1
 
-Las entidades sincronizadas usan `rev`. Si dos dispositivos modifican offline la misma versión:
-
-- el servidor no acepta que una versión vieja pise una nueva;
-- devuelve conflicto;
-- la copia local se conserva;
-- el conflicto queda guardado en IndexedDB;
-- el indicador global avisa al usuario.
-
-Nunca se resuelve un conflicto sobrescribiendo datos silenciosamente.
-
-## Entrenamiento
-
-La Etapa 1 incluye:
-
+- instalación PWA y uso offline;
+- registro, login, logout y sesiones;
+- aislamiento de datos por usuario;
 - biblioteca de ejercicios y ejercicios personalizados;
-- CRUD de rutinas;
-- rutina inicial Pierna y glúteo;
-- inicio y recuperación de sesión;
-- peso y reps reales por serie;
-- temporizador general y de descanso;
-- Wake Lock cuando el navegador lo soporta;
-- última sesión y sugerencia de progresión;
-- reemplazar/saltar/agregar ejercicios;
+- rutinas offline;
+- rutina inicial de pierna y glúteo;
+- inicio y recuperación de entrenamiento;
+- snapshots para preservar historial;
+- peso, repeticiones y series reales;
+- cronómetro total basado en timestamps;
+- descanso persistente;
+- Wake Lock cuando el navegador lo permite;
+- última sesión y sobrecarga progresiva básica;
+- reemplazar, saltar y añadir ejercicios durante la sesión;
 - series extra;
 - notas;
-- volumen;
-- récords personales;
-- abandono seguro;
-- resumen final;
-- historial en Progreso;
-- funcionamiento offline;
-- sincronización entre dispositivos.
+- calentamiento y estiramiento sugeridos;
+- volumen total y récords;
+- finalizar, abandonar y recuperar entrenamiento;
+- historial y progreso;
+- sincronización automática cada 5 segundos mientras la app está visible;
+- sincronización al abrir, reconectar o volver a primer plano;
+- cola offline, mutaciones idempotentes, revisiones y conflictos;
+- indicadores globales de conexión/sincronización;
+- layout móvil/notebook y safe areas de iPhone;
+- pruebas automáticas de API, seguridad, PWA y consola del navegador.
+
+## Prueba manual final recomendada
+
+La automatización cubre gran parte de la Etapa 1, pero una PWA móvil también
+necesita una comprobación física final:
+
+1. instalá GymBro en el iPhone;
+2. iniciá sesión con la misma cuenta en iPhone y notebook;
+3. iniciá una rutina con conexión;
+4. cortá Internet en el iPhone;
+5. registrá varias series, bloqueá la pantalla y volvé;
+6. verificá cronómetro y descanso;
+7. terminá el entrenamiento todavía offline;
+8. recuperá Internet;
+9. comprobá que el indicador pasa de pendiente a sincronizado;
+10. verificá en la notebook que la sesión aparece sin tocar el botón manual;
+11. repetí con cambios offline independientes en ambos equipos para comprobar
+    que un conflicto no sobreescribe silenciosamente datos.
 
 ## Seguridad
 
-- PBKDF2-HMAC-SHA256 para contraseñas.
-- JWT firmado solo en el Worker.
-- Sesiones revocables.
-- Todas las consultas privadas se filtran por `user_id`.
-- CORS limitado a los orígenes permitidos.
-- La PWA de producción exige autenticación.
-- `.dev.vars` y otros secretos están ignorados por Git.
-- GitHub Actions ejecuta un control de patrones comunes de secretos.
+- `.dev.vars`, `.env` y archivos locales de Wrangler están ignorados.
+- `JWT_SECRET` se guarda como secreto de Cloudflare.
+- cada consulta privada del Worker deriva el usuario desde el JWT/sesión;
+- los endpoints de edición verifican propiedad antes de modificar;
+- CORS permite únicamente los orígenes configurados;
+- los tests automáticos crean dos usuarios y comprueban que uno no pueda leer
+  o editar datos privados del otro.
 
-## PWA
+## Alcance
 
-El manifest usa:
-
-- nombre: GymBro;
-- scope/start URL: `/gyymmm/`;
-- modo: `standalone`;
-- iconos 192×192, 512×512, maskable y Apple Touch;
-- service worker con actualización automática;
-- cache de recursos esenciales, imágenes y fuentes.
-
-En iPhone se instala desde Safari con “Agregar a pantalla de inicio”.
-
-## Prueba de aceptación de Etapa 1
-
-Antes de declarar estable una versión se comprueba:
-
-- registro, login y logout;
-- aislamiento entre usuarios;
-- crear y editar rutinas;
-- iniciar y completar un entrenamiento;
-- temporizadores y Wake Lock;
-- recuperar una sesión activa;
-- uso completamente offline;
-- reconexión y vaciado del outbox;
-- sincronización iPhone ↔ notebook;
-- detección de conflictos;
-- historial y resumen;
-- build sin errores;
-- PWA instalable;
-- Worker y D1 listos en producción;
-- consola sin errores relevantes;
-- ningún secreto público.
-
-Funciones de Fotos/R2, Bienestar/Nutrición y Coach IA quedan fuera de esta etapa.
+Etapa 1 termina en la base estable de entrenamiento + offline + sync.
+Fotos/R2, bienestar avanzado y Coach IA pertenecen a etapas posteriores.
