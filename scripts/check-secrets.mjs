@@ -2,7 +2,16 @@ import { execFileSync } from 'node:child_process'
 
 const output = execFileSync(
   'git',
-  ['log', '-p', '--all', '--', '.', ':(exclude)package-lock.json', ':(exclude)api/package-lock.json'],
+  [
+    'log',
+    '-p',
+    '--all',
+    '--',
+    '.',
+    ':(exclude)package-lock.json',
+    ':(exclude)api/package-lock.json',
+    ':(exclude)scripts/check-secrets.mjs',
+  ],
   { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 },
 )
 
