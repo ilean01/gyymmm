@@ -1205,13 +1205,51 @@ app.get('/', (c) =>
   }),
 )
 
-app.get('/health', (c) =>
-  c.json({
-    ok: true,
-    service: 'gymbro-api',
-    timestamp: new Date().toISOString(),
-  }),
-)
+app.get('/health', async (c) => {
+  const [sessionColumns, setColumns, lastMigration] = await Promise.all([
+    c.env.gymbro_db
+      .prepare('PRAGMA table_info(workout_sessions)')
+      .all<{ name: string }>(),
+    c.env.gymbro_db
+      .prepare('PRAGMA table_info(workout_sets)')
+      .all<{ name: string }>(),
+    c.env.gymbro_db
+      .prepare(
+        'SELECT name FROM d1_migrations ORDER BY id DESC LIMIT 1',
+      )
+      .first<{ name: string }>()
+      .catch(() => null),
+  ])
+
+  const sessionNames = new Set(
+    (sessionColumns.results ?? []).map((column) => column.name),
+  )
+  const setNames = new Set(
+    (setColumns.results ?? []).map((column) => column.name),
+  )
+  const authReady =
+    typeof c.env.JWT_SECRET === 'string' &&
+    c.env.JWT_SECRET.trim().length >= 32
+  const schemaReady =
+    sessionNames.has('abandoned_at') &&
+    setNames.has('target_seconds') &&
+    setNames.has('is_extra')
+  const ok = authReady && schemaReady
+
+  return c.json(
+    {
+      ok,
+      service: 'gymbro-api',
+      version: 'v1',
+      authReady,
+      databaseReady: true,
+      schemaReady,
+      latestMigration: lastMigration?.name ?? null,
+      timestamp: new Date().toISOString(),
+    },
+    ok ? 200 : 503,
+  )
+})
 
 app.post('/api/v1/auth/register', async (c) => {
   const input = await c.req.json<unknown>().catch(() => null)
