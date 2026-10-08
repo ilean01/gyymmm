@@ -88,6 +88,25 @@ jobs:
       - name: Verify PWA output
         run: npm run verify:pwa
 
+      - name: Browser console and service worker smoke test
+        run: |
+          npm run preview -- --host 127.0.0.1 --port 4173 > vite-preview.log 2>&1 &
+          echo $! > vite-preview.pid
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:4173/gyymmm/login > /dev/null; then
+              break
+            fi
+            sleep 1
+          done
+          npm run test:browser
+
+      - name: Stop preview server
+        if: always()
+        run: |
+          if [ -f vite-preview.pid ]; then
+            kill "$(cat vite-preview.pid)" || true
+          fi
+
       - name: SPA fallback for GitHub Pages
         run: |
           cp dist/index.html dist/404.html
