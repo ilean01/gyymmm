@@ -141,7 +141,8 @@ export function Toast({
 }: ToastProps) {
   return (
     <div
-      role="status"
+      role={tone === 'error' ? 'alert' : 'status'}
+      aria-live={tone === 'error' ? 'assertive' : 'polite'}
       className={[
         'flex items-center justify-between gap-3 rounded-gym border px-4 py-3 text-sm shadow-gym',
         toastClasses[tone],
