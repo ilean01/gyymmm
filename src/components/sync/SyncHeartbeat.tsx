@@ -1,23 +1,53 @@
 import { useEffect } from 'react'
 import { syncPendingChanges } from '../../lib/sync'
+import { emitSyncState } from '../../lib/app-events'
 
 export function SyncHeartbeat() {
   useEffect(() => {
     let disposed = false
 
     const run = async () => {
-      if (
-        disposed ||
-        !navigator.onLine ||
-        document.visibilityState !== 'visible'
-      ) {
+      if (disposed || document.visibilityState !== 'visible') {
         return
       }
 
+      if (!navigator.onLine) {
+        emitSyncState({
+          state: 'offline',
+          message: 'Tus cambios siguen guardados en este dispositivo.',
+        })
+        return
+      }
+
+      emitSyncState({ state: 'syncing' })
+
       try {
-        await syncPendingChanges()
-      } catch {
-        // Los cambios permanecen en IndexedDB/outbox.
+        const summary = await syncPendingChanges()
+
+        if (summary.conflicts > 0) {
+          emitSyncState({
+            state: 'conflict',
+            message: 'Hay cambios que necesitan revisión.',
+          })
+        } else if (summary.failed > 0) {
+          emitSyncState({
+            state: 'error',
+            message: 'Algunos cambios no pudieron sincronizarse.',
+          })
+        } else {
+          emitSyncState({
+            state: 'synced',
+            message: 'GymBro está sincronizado.',
+          })
+        }
+      } catch (error) {
+        emitSyncState({
+          state: 'error',
+          message:
+            error instanceof Error
+              ? error.message
+              : 'No se pudo sincronizar.',
+        })
       }
     }
 
