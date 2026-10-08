@@ -28,7 +28,7 @@ if (!chromePath) {
 const targetUrl =
   process.env.GYMBRO_PREVIEW_URL ??
   'http://127.0.0.1:4173/gyymmm/login'
-const debuggingPort = 9222
+const debuggingPort = 10000 + (process.pid % 40000)
 const chrome = spawn(
   chromePath,
   [
