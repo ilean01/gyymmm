@@ -11,6 +11,7 @@ import '@fontsource/barlow-condensed/700.css'
 import '@fontsource/barlow-condensed/800.css'
 import './index.css'
 import App from './App.tsx'
+import { GlobalErrorBoundary } from './components/system/GlobalErrorBoundary'
 
 let reloadingForUpdate = false
 
@@ -43,8 +44,10 @@ const updateSW = registerSW({
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <BrowserRouter basename={import.meta.env.BASE_URL}>
-      <App />
-    </BrowserRouter>
+    <GlobalErrorBoundary>
+      <BrowserRouter basename={import.meta.env.BASE_URL}>
+        <App />
+      </BrowserRouter>
+    </GlobalErrorBoundary>
   </StrictMode>,
 )
