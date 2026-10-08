@@ -44,15 +44,29 @@ jobs:
         working-directory: api
         run: npm ci
 
+      - name: Check repository history for secrets
+        run: npm run check:secrets
+
+      - name: Lint frontend
+        run: npm run lint
+
       - name: Typecheck API
         working-directory: api
         run: npm run typecheck
 
-      - name: Build
+      - name: Build production frontend
+        env:
+          VITE_API_URL: https://gymbro-api.ileanasanabria14.workers.dev
+          VITE_AUTH_REQUIRED: "true"
         run: npm run build
 
+      - name: Verify PWA output
+        run: npm run verify:pwa
+
       - name: SPA fallback for GitHub Pages
-        run: cp dist/index.html dist/404.html
+        run: |
+          cp dist/index.html dist/404.html
+          test -f dist/404.html
 
       - name: Setup Pages
         uses: actions/configure-pages@v5
