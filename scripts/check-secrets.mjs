@@ -33,11 +33,17 @@ const hits = []
 
 for (const pattern of suspiciousPatterns) {
   for (const match of output.matchAll(pattern)) {
-    if (
-      pattern.source.startsWith('JWT_SECRET') &&
-      allowedJwtValues.has(match[1])
-    ) {
-      continue
+    if (pattern.source.startsWith('JWT_SECRET')) {
+      const value = match[1] ?? ''
+
+      if (
+        allowedJwtValues.has(value) ||
+        value.startsWith('%s') ||
+        value.startsWith('$(') ||
+        value.startsWith('${')
+      ) {
+        continue
+      }
     }
 
     hits.push(match[0].slice(0, 24) + '…')
