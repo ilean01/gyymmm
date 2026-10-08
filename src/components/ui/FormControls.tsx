@@ -1,3 +1,4 @@
+import { useId } from 'react'
 import type {
   InputHTMLAttributes,
   SelectHTMLAttributes,
@@ -21,7 +22,9 @@ export function Input({
   className = '',
   ...props
 }: InputProps) {
-  const inputId = id ?? props.name
+  const generatedId = useId()
+  const inputId = id ?? props.name ?? generatedId
+  const descriptionId = error || hint ? inputId + '-description' : undefined
 
   return (
     <label htmlFor={inputId} className="block text-sm font-medium text-gym-muted">
@@ -29,6 +32,8 @@ export function Input({
       <input
         {...props}
         id={inputId}
+        aria-invalid={error ? true : undefined}
+        aria-describedby={descriptionId}
         className={[
           'mt-2 min-h-12 w-full rounded-gym border bg-gym-bg px-4 text-base font-semibold text-gym-text outline-none transition placeholder:text-gym-muted/60 focus:border-gym-accent focus:ring-2 focus:ring-gym-accent/20',
           error ? 'border-gym-accent' : 'border-gym-border',
@@ -38,9 +43,20 @@ export function Input({
           .join(' ')}
       />
       {error ? (
-        <span className="mt-1 block text-xs text-gym-accent">{error}</span>
+        <span
+          id={descriptionId}
+          role="alert"
+          className="mt-1 block text-xs text-gym-accent"
+        >
+          {error}
+        </span>
       ) : hint ? (
-        <span className="mt-1 block text-xs text-gym-muted">{hint}</span>
+        <span
+          id={descriptionId}
+          className="mt-1 block text-xs text-gym-muted"
+        >
+          {hint}
+        </span>
       ) : null}
     </label>
   )
@@ -116,7 +132,9 @@ export function Select({
   children,
   ...props
 }: SelectProps) {
-  const selectId = id ?? props.name
+  const generatedId = useId()
+  const selectId = id ?? props.name ?? generatedId
+  const descriptionId = error || hint ? selectId + '-description' : undefined
 
   return (
     <label htmlFor={selectId} className="block text-sm font-medium text-gym-muted">
@@ -124,6 +142,8 @@ export function Select({
       <select
         {...props}
         id={selectId}
+        aria-invalid={error ? true : undefined}
+        aria-describedby={descriptionId}
         className={[
           'mt-2 min-h-12 w-full rounded-gym border bg-gym-bg px-4 text-base font-semibold text-gym-text outline-none transition focus:border-gym-accent focus:ring-2 focus:ring-gym-accent/20',
           error ? 'border-gym-accent' : 'border-gym-border',
@@ -135,9 +155,20 @@ export function Select({
         {children}
       </select>
       {error ? (
-        <span className="mt-1 block text-xs text-gym-accent">{error}</span>
+        <span
+          id={descriptionId}
+          role="alert"
+          className="mt-1 block text-xs text-gym-accent"
+        >
+          {error}
+        </span>
       ) : hint ? (
-        <span className="mt-1 block text-xs text-gym-muted">{hint}</span>
+        <span
+          id={descriptionId}
+          className="mt-1 block text-xs text-gym-muted"
+        >
+          {hint}
+        </span>
       ) : null}
     </label>
   )
