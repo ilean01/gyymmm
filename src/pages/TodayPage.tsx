@@ -14,6 +14,7 @@ import {
   startWorkoutFromRoutine,
 } from '../lib/domain-db'
 import { syncPendingChanges } from '../lib/sync'
+import { logoutAccount } from '../lib/api'
 import type { Routine } from '../types/domain'
 import type {
   SyncConflict,
@@ -370,6 +371,20 @@ export function TodayPage() {
           </Button>
         </Link>
       </div>
+
+      <Button
+        type="button"
+        variant="ghost"
+        fullWidth
+        className="mt-6"
+        onClick={() => {
+          void logoutAccount().finally(() => {
+            navigate('/login', { replace: true })
+          })
+        }}
+      >
+        Cerrar sesión
+      </Button>
     </PageSection>
   )
 }
