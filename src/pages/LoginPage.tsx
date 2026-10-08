@@ -18,6 +18,13 @@ export function LoginPage() {
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
+  const [authNotice] = useState(() => {
+    const notice = sessionStorage.getItem('gymbro:auth-notice')
+    if (notice) {
+      sessionStorage.removeItem('gymbro:auth-notice')
+    }
+    return notice
+  })
 
   if (existingSession) {
     return <Navigate to="/" replace />
@@ -70,6 +77,14 @@ export function LoginPage() {
         </p>
 
         <Card className="mt-6">
+          {authNotice && (
+            <p
+              role="status"
+              className="mb-4 rounded-gym border border-gym-warning/40 bg-gym-warning/10 px-3 py-2 text-sm text-gym-warning"
+            >
+              {authNotice}
+            </p>
+          )}
           <form onSubmit={handleSubmit} className="space-y-4">
             <Input
               label="Email"
