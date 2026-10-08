@@ -235,7 +235,7 @@ assert(
   'user A set must not appear for user B',
 )
 
-const allowedCors = await fetch(baseUrl + '/health', {
+const allowedCors = await fetch(baseUrl + '/api/v1/sync/status', {
   method: 'OPTIONS',
   headers: {
     Origin: 'https://ilean01.github.io',
@@ -248,7 +248,7 @@ assert(
   'GitHub Pages origin must be allowed by CORS',
 )
 
-const deniedCors = await fetch(baseUrl + '/health', {
+const deniedCors = await fetch(baseUrl + '/api/v1/sync/status', {
   method: 'OPTIONS',
   headers: {
     Origin: 'https://evil.example',
