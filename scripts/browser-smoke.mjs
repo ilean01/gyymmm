@@ -165,7 +165,7 @@ if (!parsedState.manifest?.includes('/gyymmm/manifest.webmanifest')) {
   failures.push('manifest link missing or incorrect')
 }
 
-if (!parsedState.bodyText.includes('Iniciar sesión')) {
+if (!parsedState.bodyText.toLocaleLowerCase('es').includes('iniciar sesión')) {
   failures.push(
     'production auth route did not render login; body=' +
       JSON.stringify(parsedState.bodyText),
