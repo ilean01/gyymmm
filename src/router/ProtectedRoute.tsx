@@ -12,7 +12,7 @@ interface ProtectedRouteProps {
 
 export function ProtectedRoute({ children }: ProtectedRouteProps) {
   const location = useLocation()
-  const authRequired = import.meta.env.VITE_AUTH_REQUIRED === 'true'
+  const authRequired = import.meta.env.VITE_AUTH_REQUIRED !== 'false'
   const [session, setSession] = useState(() => getAuthSession())
 
   useEffect(() => {
