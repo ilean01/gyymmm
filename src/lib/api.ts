@@ -102,6 +102,10 @@ export async function apiRequest<T>(
     const errorBody = parsed as ApiErrorBody | null
 
     if (response.status === 401 && auth) {
+      sessionStorage.setItem(
+        'gymbro:auth-notice',
+        'Tu sesión venció o dejó de ser válida. Iniciá sesión nuevamente.',
+      )
       clearAuthSession()
     }
 
