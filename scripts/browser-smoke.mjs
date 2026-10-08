@@ -36,7 +36,10 @@ const chrome = spawn(
     '--no-sandbox',
     '--disable-gpu',
     '--disable-dev-shm-usage',
+    '--remote-debugging-address=127.0.0.1',
     '--remote-debugging-port=' + debuggingPort,
+    '--no-first-run',
+    '--no-default-browser-check',
     '--user-data-dir=/tmp/gymbro-chrome-profile',
     targetUrl,
   ],
@@ -53,7 +56,7 @@ async function sleep(ms) {
 }
 
 async function getTarget() {
-  for (let attempt = 0; attempt < 40; attempt += 1) {
+  for (let attempt = 0; attempt < 120; attempt += 1) {
     try {
       const response = await fetch(
         'http://127.0.0.1:' + debuggingPort + '/json',
@@ -76,7 +79,10 @@ async function getTarget() {
     }
     await sleep(250)
   }
-  throw new Error('Chrome DevTools Protocol no estuvo disponible.')
+  throw new Error(
+    'Chrome DevTools Protocol no estuvo disponible. Chrome stderr: ' +
+      stderr.slice(-1200),
+  )
 }
 
 const target = await getTarget()
