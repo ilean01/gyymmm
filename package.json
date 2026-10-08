@@ -7,7 +7,11 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "typecheck": "tsc -b --pretty false",
+    "verify:pwa": "node scripts/verify-dist.mjs",
+    "check:secrets": "node scripts/check-secrets.mjs",
+    "check": "npm run lint && npm run build && npm run verify:pwa"
   },
   "dependencies": {
     "@fontsource/barlow": "^5.3.0",
