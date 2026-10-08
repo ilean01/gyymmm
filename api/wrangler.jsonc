@@ -6,6 +6,9 @@
 	"observability": {
 		"enabled": true
 	},
+	"secrets": {
+		"required": ["JWT_SECRET"]
+	},
 	"d1_databases": [
 		{
 			"binding": "gymbro_db",
