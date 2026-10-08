@@ -59,9 +59,17 @@ async function getTarget() {
         'http://127.0.0.1:' + debuggingPort + '/json',
       )
       const targets = await response.json()
-      const page = targets.find(
-        (target) => target.type === 'page' && target.webSocketDebuggerUrl,
-      )
+      const page =
+        targets.find(
+          (target) =>
+            target.type === 'page' &&
+            target.webSocketDebuggerUrl &&
+            String(target.url ?? '').includes('127.0.0.1:4173'),
+        ) ??
+        targets.find(
+          (target) =>
+            target.type === 'page' && target.webSocketDebuggerUrl,
+        )
       if (page) return page
     } catch {
       // Chrome is still starting.
@@ -158,7 +166,10 @@ if (!parsedState.manifest?.includes('/gyymmm/manifest.webmanifest')) {
 }
 
 if (!parsedState.bodyText.includes('Iniciar sesión')) {
-  failures.push('production auth route did not render login')
+  failures.push(
+    'production auth route did not render login; body=' +
+      JSON.stringify(parsedState.bodyText),
+  )
 }
 
 const swExpression = "(async()=>{if(!('serviceWorker' in navigator))return 'unsupported';const registration=await Promise.race([navigator.serviceWorker.ready,new Promise((resolve)=>setTimeout(()=>resolve(null),5000))]);return registration?'ready':'timeout'})()"
