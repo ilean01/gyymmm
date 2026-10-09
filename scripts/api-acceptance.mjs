@@ -111,6 +111,20 @@ const createdExercise = await request('/api/v1/exercises', {
 })
 assert(createdExercise.response.status === 201, 'exercise create must return 201')
 
+const retriedExerciseCreate = await request('/api/v1/exercises', {
+  method: 'POST',
+  token: userAToken,
+  body: exercise,
+})
+assert(
+  retriedExerciseCreate.response.status === 200,
+  'retrying the same exercise create must be idempotent',
+)
+assert(
+  retriedExerciseCreate.json.exercise.rev === 1,
+  'retrying exercise create must keep server revision',
+)
+
 const bCannotEditExercise = await request(
   '/api/v1/exercises/' + exerciseId,
   {
@@ -151,10 +165,29 @@ const createdRoutine = await request('/api/v1/routines', {
 })
 assert(createdRoutine.response.status === 201, 'routine create must return 201')
 
+const retriedRoutineCreate = await request('/api/v1/routines', {
+  method: 'POST',
+  token: userAToken,
+  body: routine,
+})
+assert(
+  retriedRoutineCreate.response.status === 200,
+  'retrying the same routine create must be idempotent',
+)
+assert(
+  retriedRoutineCreate.json.routine.rev === 1,
+  'retrying routine create must keep server revision',
+)
+
+const routineServerRev = createdRoutine.json.routine.rev
 const editedRoutine = await request('/api/v1/routines/' + routineId, {
   method: 'PUT',
   token: userAToken,
-  body: { ...routine, name: 'CI Routine Edited ' + stamp },
+  body: {
+    ...routine,
+    rev: routineServerRev,
+    name: 'CI Routine Edited ' + stamp,
+  },
 })
 assert(editedRoutine.response.status === 200, 'routine edit must return 200')
 
@@ -235,6 +268,407 @@ assert(
   'user A set must not appear for user B',
 )
 
+const deviceExerciseId = crypto.randomUUID()
+const deviceExercise = {
+  id: deviceExerciseId,
+  name: 'Two Device Exercise ' + stamp,
+  muscleGroup: 'Test',
+  equipment: 'Test',
+  instructions: 'Conflict test.',
+  imagePath: null,
+  rev: 0,
+}
+
+const deviceExerciseCreated = await request('/api/v1/exercises', {
+  method: 'POST',
+  token: userA.token,
+  body: deviceExercise,
+})
+assert(
+  deviceExerciseCreated.response.status === 201,
+  'device exercise create must return 201',
+)
+const deviceExerciseRev = deviceExerciseCreated.json.exercise.rev
+
+const deviceAExerciseEdit = await request(
+  '/api/v1/exercises/' + deviceExerciseId,
+  {
+    method: 'PUT',
+    token: userA.token,
+    body: {
+      ...deviceExercise,
+      rev: deviceExerciseRev,
+      name: 'Device A Exercise ' + stamp,
+    },
+  },
+)
+assert(
+  deviceAExerciseEdit.response.status === 200,
+  'device A exercise edit must succeed',
+)
+
+const staleDeviceBExerciseEdit = await request(
+  '/api/v1/exercises/' + deviceExerciseId,
+  {
+    method: 'PUT',
+    token: userAToken,
+    body: {
+      ...deviceExercise,
+      rev: deviceExerciseRev,
+      name: 'Device B stale exercise ' + stamp,
+    },
+  },
+)
+assert(
+  staleDeviceBExerciseEdit.response.status === 409,
+  'stale same-user exercise edit must return 409',
+)
+assert(
+  staleDeviceBExerciseEdit.json?.error === 'sync_conflict',
+  'stale exercise edit must be identified as a sync conflict',
+)
+
+const deviceRoutineId = crypto.randomUUID()
+const deviceRoutine = {
+  id: deviceRoutineId,
+  name: 'Two Device Routine ' + stamp,
+  notes: null,
+  status: 'active',
+  weekdays: [2],
+  exercises: [],
+  rev: 0,
+}
+
+const deviceRoutineCreated = await request('/api/v1/routines', {
+  method: 'POST',
+  token: userA.token,
+  body: deviceRoutine,
+})
+assert(
+  deviceRoutineCreated.response.status === 201,
+  'device routine create must return 201',
+)
+const deviceRoutineRev = deviceRoutineCreated.json.routine.rev
+
+const deviceARoutineEdit = await request(
+  '/api/v1/routines/' + deviceRoutineId,
+  {
+    method: 'PUT',
+    token: userA.token,
+    body: {
+      ...deviceRoutine,
+      rev: deviceRoutineRev,
+      name: 'Device A Routine ' + stamp,
+    },
+  },
+)
+assert(
+  deviceARoutineEdit.response.status === 200,
+  'device A routine edit must succeed',
+)
+
+const staleDeviceBRoutineEdit = await request(
+  '/api/v1/routines/' + deviceRoutineId,
+  {
+    method: 'PUT',
+    token: userAToken,
+    body: {
+      ...deviceRoutine,
+      rev: deviceRoutineRev,
+      name: 'Device B stale routine ' + stamp,
+    },
+  },
+)
+assert(
+  staleDeviceBRoutineEdit.response.status === 409,
+  'stale same-user routine edit must return 409',
+)
+assert(
+  staleDeviceBRoutineEdit.json?.error === 'sync_conflict',
+  'stale routine edit must be identified as a sync conflict',
+)
+
+const syncSessionId = crypto.randomUUID()
+const syncStartedAt = new Date().toISOString()
+const syncSessionPayload = {
+  id: syncSessionId,
+  routineId: null,
+  routineName: 'Two Device Session',
+  startedAt: syncStartedAt,
+  completedAt: null,
+  abandonedAt: null,
+  status: 'active',
+  updatedAt: syncStartedAt,
+}
+
+const sessionCreateMutation = crypto.randomUUID()
+const syncSessionCreated = await request('/api/v1/sync/push', {
+  method: 'POST',
+  token: userA.token,
+  body: {
+    mutations: [
+      {
+        mutationId: sessionCreateMutation,
+        entityType: 'workoutSession',
+        entityId: syncSessionId,
+        operation: 'upsert',
+        payload: syncSessionPayload,
+        baseRev: 0,
+      },
+    ],
+  },
+})
+assert(syncSessionCreated.response.status === 200, 'sync session push must work')
+assert(
+  syncSessionCreated.json.results[0].status === 'applied',
+  'new sync session must be applied',
+)
+assert(
+  syncSessionCreated.json.results[0].resultingRev === 1,
+  'new sync session must start at rev 1',
+)
+
+const repeatedSessionMutation = await request('/api/v1/sync/push', {
+  method: 'POST',
+  token: userA.token,
+  body: {
+    mutations: [
+      {
+        mutationId: sessionCreateMutation,
+        entityType: 'workoutSession',
+        entityId: syncSessionId,
+        operation: 'upsert',
+        payload: syncSessionPayload,
+        baseRev: 0,
+      },
+    ],
+  },
+})
+assert(
+  repeatedSessionMutation.json.results[0].status === 'applied' &&
+    repeatedSessionMutation.json.results[0].resultingRev === 1,
+  'replaying the same mutation must be idempotent',
+)
+
+const deviceBPull = await request('/api/v1/sync/pull?cursor=0', {
+  token: userAToken,
+})
+assert(deviceBPull.response.status === 200, 'second device pull must work')
+assert(
+  deviceBPull.json.changes.some(
+    (change) =>
+      change.entityType === 'workoutSession' &&
+      change.entityId === syncSessionId,
+  ),
+  'second device must receive the same-user workout session',
+)
+
+const deviceASessionEdit = await request('/api/v1/sync/push', {
+  method: 'POST',
+  token: userA.token,
+  body: {
+    mutations: [
+      {
+        mutationId: crypto.randomUUID(),
+        entityType: 'workoutSession',
+        entityId: syncSessionId,
+        operation: 'upsert',
+        payload: {
+          ...syncSessionPayload,
+          routineName: 'Device A Session',
+          updatedAt: new Date(Date.now() + 1000).toISOString(),
+        },
+        baseRev: 1,
+      },
+    ],
+  },
+})
+assert(
+  deviceASessionEdit.json.results[0].status === 'applied' &&
+    deviceASessionEdit.json.results[0].resultingRev === 2,
+  'device A session edit must create rev 2',
+)
+
+const staleDeviceBSessionEdit = await request('/api/v1/sync/push', {
+  method: 'POST',
+  token: userAToken,
+  body: {
+    mutations: [
+      {
+        mutationId: crypto.randomUUID(),
+        entityType: 'workoutSession',
+        entityId: syncSessionId,
+        operation: 'upsert',
+        payload: {
+          ...syncSessionPayload,
+          routineName: 'Device B stale Session',
+          updatedAt: new Date(Date.now() + 2000).toISOString(),
+        },
+        baseRev: 1,
+      },
+    ],
+  },
+})
+assert(
+  staleDeviceBSessionEdit.json.results[0].status === 'conflict',
+  'stale same-user session edit must produce a conflict',
+)
+assert(
+  staleDeviceBSessionEdit.json.results[0].serverRev === 2,
+  'session conflict must expose the current server revision',
+)
+
+const snapshotExerciseId = crypto.randomUUID()
+const workoutExerciseId = crypto.randomUUID()
+const workoutExerciseSnapshot = {
+  id: workoutExerciseId,
+  sessionId: syncSessionId,
+  sourceRoutineExerciseId: null,
+  exerciseId: snapshotExerciseId,
+  exerciseName: 'Snapshot exercise',
+  position: 0,
+  status: 'active',
+  notes: null,
+  restSeconds: 60,
+  replacedExerciseId: null,
+  rev: 0,
+  updatedAt: new Date().toISOString(),
+}
+
+const snapshotCreated = await request(
+  '/api/v1/workout-exercises/' + workoutExerciseId,
+  {
+    method: 'PUT',
+    token: userA.token,
+    body: workoutExerciseSnapshot,
+  },
+)
+assert(snapshotCreated.response.status === 200, 'workout snapshot create must work')
+assert(snapshotCreated.json.rev === 1, 'workout snapshot must start at rev 1')
+
+const snapshotVisibleOnDeviceB = await request(
+  '/api/v1/workout-exercises?sessionId=' + syncSessionId,
+  { token: userAToken },
+)
+assert(
+  snapshotVisibleOnDeviceB.json.exercises.some(
+    (item) => item.id === workoutExerciseId,
+  ),
+  'second device must receive workout exercise snapshots',
+)
+
+const snapshotDeviceAEdit = await request(
+  '/api/v1/workout-exercises/' + workoutExerciseId,
+  {
+    method: 'PUT',
+    token: userA.token,
+    body: {
+      ...workoutExerciseSnapshot,
+      rev: 1,
+      notes: 'Device A note',
+      updatedAt: new Date(Date.now() + 3000).toISOString(),
+    },
+  },
+)
+assert(snapshotDeviceAEdit.json.rev === 2, 'snapshot device A edit must reach rev 2')
+
+const staleSnapshotDeviceBEdit = await request(
+  '/api/v1/workout-exercises/' + workoutExerciseId,
+  {
+    method: 'PUT',
+    token: userAToken,
+    body: {
+      ...workoutExerciseSnapshot,
+      rev: 1,
+      notes: 'Device B stale note',
+      updatedAt: new Date(Date.now() + 4000).toISOString(),
+    },
+  },
+)
+assert(
+  staleSnapshotDeviceBEdit.response.status === 409 &&
+    staleSnapshotDeviceBEdit.json?.error === 'sync_conflict',
+  'stale workout exercise snapshot must not overwrite silently',
+)
+
+const planSetId = crypto.randomUUID()
+const planSet = {
+  id: planSetId,
+  sessionId: syncSessionId,
+  workoutExerciseId,
+  exerciseId: snapshotExerciseId,
+  exerciseName: 'Snapshot exercise',
+  setNumber: 1,
+  targetWeightKg: 20,
+  targetReps: 10,
+  targetSeconds: null,
+  actualWeightKg: null,
+  actualReps: null,
+  durationSeconds: null,
+  completedAt: null,
+  isExtra: false,
+  rev: 0,
+  updatedAt: new Date().toISOString(),
+}
+
+const planSetCreated = await request(
+  '/api/v1/workout-plan-sets/' + planSetId,
+  {
+    method: 'PUT',
+    token: userA.token,
+    body: planSet,
+  },
+)
+assert(planSetCreated.response.status === 200, 'planned set create must work')
+assert(planSetCreated.json.rev === 1, 'planned set must start at rev 1')
+
+const planSetVisibleDeviceB = await request(
+  '/api/v1/workout-plan-sets?sessionId=' + syncSessionId,
+  { token: userAToken },
+)
+assert(
+  planSetVisibleDeviceB.json.sets.some((item) => item.id === planSetId),
+  'second device must receive planned sets',
+)
+
+const planSetDeviceAEdit = await request(
+  '/api/v1/workout-plan-sets/' + planSetId,
+  {
+    method: 'PUT',
+    token: userA.token,
+    body: {
+      ...planSet,
+      rev: 1,
+      actualWeightKg: 20,
+      actualReps: 10,
+      completedAt: new Date().toISOString(),
+      updatedAt: new Date(Date.now() + 5000).toISOString(),
+    },
+  },
+)
+assert(planSetDeviceAEdit.json.rev === 2, 'planned set device A edit must reach rev 2')
+
+const stalePlanSetDeviceBEdit = await request(
+  '/api/v1/workout-plan-sets/' + planSetId,
+  {
+    method: 'PUT',
+    token: userAToken,
+    body: {
+      ...planSet,
+      rev: 1,
+      actualWeightKg: 25,
+      actualReps: 8,
+      completedAt: new Date().toISOString(),
+      updatedAt: new Date(Date.now() + 6000).toISOString(),
+    },
+  },
+)
+assert(
+  stalePlanSetDeviceBEdit.response.status === 409 &&
+    stalePlanSetDeviceBEdit.json?.error === 'sync_conflict',
+  'stale planned set must not overwrite silently',
+)
+
 const allowedCors = await fetch(baseUrl + '/api/v1/sync/status', {
   method: 'OPTIONS',
   headers: {
@@ -272,4 +706,6 @@ const revokedMe = await request('/api/v1/auth/me', {
 })
 assert(revokedMe.response.status === 401, 'revoked token must return 401')
 
-console.log('GymBro API acceptance + isolation tests passed.')
+console.log(
+  'GymBro API acceptance, isolation, idempotency and multi-device conflict tests passed.',
+)
