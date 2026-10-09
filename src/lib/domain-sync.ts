@@ -1,4 +1,5 @@
 import { ApiError, apiRequest } from './api'
+import { getSetting, saveSetting } from './db'
 import {
   markDomainSyncConflict,
   markDomainSyncFailure,
@@ -193,6 +194,63 @@ export async function syncWorkoutSnapshotOutbox(
   return { synced, failed, conflicts }
 }
 
+
+export async function pullDomainChanges(): Promise<{
+  exercises: number
+  routines: number
+  workoutExercises: number
+  sets: number
+}> {
+  const since =
+    (await getSetting<string>('domainSyncCursor')) ??
+    '1970-01-01T00:00:00.000Z'
+
+  const response = await apiRequest<{
+    ok: true
+    cursor: string
+    exercises: Exercise[]
+    routines: Routine[]
+    workoutExercises: WorkoutExercise[]
+    plannedSets: PlannedWorkoutSet[]
+  }>(
+    '/api/v1/sync/domain?since=' + encodeURIComponent(since),
+  )
+
+  const [exercises, routines, workout] = await Promise.all([
+    mergeRemoteExercises(
+      response.exercises.map((exercise) => ({
+        ...exercise,
+        syncState: 'synced',
+      })),
+    ),
+    mergeRemoteRoutines(
+      response.routines.map((routine) => ({
+        ...routine,
+        syncState: 'synced',
+      })),
+    ),
+    mergeRemoteWorkoutSnapshots(
+      response.workoutExercises.map((exercise) => ({
+        ...exercise,
+        syncState: 'synced',
+      })),
+      response.plannedSets.map((set) => ({
+        ...set,
+        isExtra: set.isExtra ?? false,
+        syncState: 'synced',
+      })),
+    ),
+  ])
+
+  await saveSetting('domainSyncCursor', response.cursor)
+
+  return {
+    exercises,
+    routines,
+    workoutExercises: workout.exercises,
+    sets: workout.sets,
+  }
+}
 
 export async function pullWorkoutSnapshots(): Promise<{
   exercises: number
