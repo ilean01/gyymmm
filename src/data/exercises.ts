@@ -11,7 +11,7 @@ export const BUILTIN_EXERCISES: Exercise[] = [
     equipment: 'Barra o máquina',
     instructions:
       'Apoyá la parte alta de la espalda, mantené el abdomen firme y extendé la cadera sin arquear la zona lumbar.',
-    imagePath: null,
+    imagePath: 'exercises/hip-thrust.svg',
     isBuiltin: true,
     archivedAt: null,
     rev: 1,
@@ -26,7 +26,7 @@ export const BUILTIN_EXERCISES: Exercise[] = [
     equipment: 'Mancuernas o peso corporal',
     instructions:
       'Apoyá el pie trasero, bajá de forma controlada y empujá con el pie delantero manteniendo la rodilla alineada.',
-    imagePath: null,
+    imagePath: 'exercises/bulgaras.svg',
     isBuiltin: true,
     archivedAt: null,
     rev: 1,
@@ -41,7 +41,7 @@ export const BUILTIN_EXERCISES: Exercise[] = [
     equipment: 'Barra o mancuernas',
     instructions:
       'Llevá la cadera hacia atrás con espalda neutra y bajá el peso cerca de las piernas hasta sentir tensión en los isquiotibiales.',
-    imagePath: null,
+    imagePath: 'exercises/peso-muerto-rumano.svg',
     isBuiltin: true,
     archivedAt: null,
     rev: 1,
@@ -56,7 +56,7 @@ export const BUILTIN_EXERCISES: Exercise[] = [
     equipment: 'Mancuerna o peso corporal',
     instructions:
       'Mantené una ligera flexión de rodilla, incliná el torso desde la cadera y conservá la pelvis estable.',
-    imagePath: null,
+    imagePath: 'exercises/peso-muerto-una-pierna.svg',
     isBuiltin: true,
     archivedAt: null,
     rev: 1,
@@ -71,7 +71,7 @@ export const BUILTIN_EXERCISES: Exercise[] = [
     equipment: 'Máquina de curl femoral',
     instructions:
       'Flexioná las rodillas de forma controlada, evitá despegar la cadera del apoyo y regresá sin soltar el peso.',
-    imagePath: null,
+    imagePath: 'exercises/femoral.svg',
     isBuiltin: true,
     archivedAt: null,
     rev: 1,
@@ -86,7 +86,7 @@ export const BUILTIN_EXERCISES: Exercise[] = [
     equipment: 'Peso corporal',
     instructions:
       'Alineá hombros, cadera y tobillos. Contraé abdomen y glúteos sin dejar caer la zona lumbar.',
-    imagePath: null,
+    imagePath: 'exercises/plancha-frontal.svg',
     isBuiltin: true,
     archivedAt: null,
     rev: 1,
@@ -101,7 +101,7 @@ export const BUILTIN_EXERCISES: Exercise[] = [
     equipment: 'Colchoneta',
     instructions:
       'Elevá hombros acercando las costillas a la pelvis sin tirar del cuello y bajá de forma controlada.',
-    imagePath: null,
+    imagePath: 'exercises/crunch.svg',
     isBuiltin: true,
     archivedAt: null,
     rev: 1,
@@ -116,7 +116,7 @@ export const BUILTIN_EXERCISES: Exercise[] = [
     equipment: 'Barra o peso corporal',
     instructions:
       'Descendé con el torso estable, rodillas alineadas con los pies y empujá el suelo para volver a subir.',
-    imagePath: null,
+    imagePath: 'exercises/sentadilla.svg',
     isBuiltin: true,
     archivedAt: null,
     rev: 1,
@@ -131,7 +131,7 @@ export const BUILTIN_EXERCISES: Exercise[] = [
     equipment: 'Prensa',
     instructions:
       'Apoyá toda la espalda, bajá la plataforma hasta un rango cómodo y extendé sin bloquear violentamente las rodillas.',
-    imagePath: null,
+    imagePath: 'exercises/prensa-piernas.svg',
     isBuiltin: true,
     archivedAt: null,
     rev: 1,
@@ -146,7 +146,7 @@ export const BUILTIN_EXERCISES: Exercise[] = [
     equipment: 'Máquina, escalón o mancuernas',
     instructions:
       'Elevá los talones hasta quedar sobre la punta de los pies, hacé una pausa y descendé lentamente.',
-    imagePath: null,
+    imagePath: 'exercises/elevacion-gemelos.svg',
     isBuiltin: true,
     archivedAt: null,
     rev: 1,
@@ -161,7 +161,7 @@ export const BUILTIN_EXERCISES: Exercise[] = [
     equipment: 'Polea',
     instructions:
       'Llevá los codos hacia atrás manteniendo el pecho estable y evitá encoger los hombros.',
-    imagePath: null,
+    imagePath: 'exercises/remo-sentado.svg',
     isBuiltin: true,
     archivedAt: null,
     rev: 1,
@@ -176,7 +176,7 @@ export const BUILTIN_EXERCISES: Exercise[] = [
     equipment: 'Máquina o mancuernas',
     instructions:
       'Mantené las escápulas apoyadas, empujá de forma controlada y evitá hiperextender los codos.',
-    imagePath: null,
+    imagePath: 'exercises/press-pecho.svg',
     isBuiltin: true,
     archivedAt: null,
     rev: 1,
