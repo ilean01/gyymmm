@@ -2686,12 +2686,26 @@ app.delete('/api/v1/workout-plan-sets/:id', requireAuth, async (c) => {
     )
   }
 
+  const nextRev = baseRev + 1
+  const now = new Date().toISOString()
+
   await c.env.gymbro_db
-    .prepare('DELETE FROM workout_sets WHERE id = ? AND user_id = ?')
-    .bind(c.req.param('id'), userId)
+    .prepare(
+      `UPDATE workout_sets
+       SET deleted_at = ?, updated_at = ?, rev = ?
+       WHERE id = ? AND user_id = ? AND rev = ?`,
+    )
+    .bind(
+      now,
+      now,
+      nextRev,
+      c.req.param('id'),
+      userId,
+      baseRev,
+    )
     .run()
 
-  return c.json({ ok: true, rev: baseRev + 1 })
+  return c.json({ ok: true, rev: nextRev })
 })
 
 app.post('/api/v1/sync/push', requireAuth, async (c) => {
