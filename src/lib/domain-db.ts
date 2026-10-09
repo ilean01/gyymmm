@@ -979,6 +979,13 @@ export async function mergeRemoteWorkoutSnapshots(
 
       for (const set of remoteSets) {
         if (pending.has(`workoutPlanSet:${set.id}`)) continue
+
+        if (set.deletedAt) {
+          setStore.delete(set.id)
+          sets += 1
+          continue
+        }
+
         setStore.put({
           ...set,
           isExtra: set.isExtra ?? false,
