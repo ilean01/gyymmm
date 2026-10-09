@@ -6,6 +6,8 @@ import {
   getLocalProfile,
   getSyncConflicts,
   getSyncQueue,
+  resolveSyncConflictKeepLocal,
+  resolveSyncConflictWithServer,
 } from '../lib/db'
 import {
   getActiveWorkoutSession,
@@ -66,6 +68,44 @@ export function TodayPage() {
     setQueue(localQueue)
     setConflicts(localConflicts)
     setDisplayName(profile?.displayName ?? null)
+  }
+
+  function conflictLabel(conflict: SyncConflict): string {
+    switch (conflict.entityType) {
+      case 'exercise':
+        return 'Ejercicio'
+      case 'routine':
+        return 'Rutina'
+      case 'workoutSession':
+        return 'Sesión'
+      case 'workoutExercise':
+        return 'Ejercicio del entrenamiento'
+      case 'workoutPlanSet':
+      case 'workoutSet':
+        return 'Serie'
+    }
+  }
+
+  async function handleUseServer(conflict: SyncConflict) {
+    await resolveSyncConflictWithServer(conflict.id)
+    await refresh()
+    setMessage(
+      conflictLabel(conflict) +
+        ': se conservó la versión sincronizada del servidor.',
+    )
+  }
+
+  async function handleKeepLocal(conflict: SyncConflict) {
+    await resolveSyncConflictKeepLocal(conflict.id)
+    await refresh()
+    setMessage(
+      conflictLabel(conflict) +
+        ': tu versión local se volverá a enviar sobre la revisión más reciente.',
+    )
+
+    if (navigator.onLine) {
+      await handleSync(false)
+    }
   }
 
   async function handleSync(showMessage = true) {
@@ -338,6 +378,40 @@ export function TodayPage() {
               ? 'GymBro los enviará automáticamente cuando haya conexión.'
               : 'No hay cambios esperando sincronización.'}
         </p>
+
+        {conflicts.length > 0 && (
+          <div className="mt-4 space-y-3">
+            {conflicts.map((conflict) => (
+              <div
+                key={conflict.id}
+                className="rounded-gym border border-gym-warning/40 bg-gym-warning/5 p-3"
+              >
+                <p className="font-semibold text-gym-text">
+                  {conflictLabel(conflict)}
+                </p>
+                <p className="mt-1 text-xs leading-5 text-gym-muted">
+                  Este dato cambió también en otro dispositivo. Elegí qué
+                  versión querés conservar; nada se reemplaza sin tu decisión.
+                </p>
+                <div className="mt-3 grid grid-cols-2 gap-2">
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    onClick={() => void handleUseServer(conflict)}
+                  >
+                    Usar servidor
+                  </Button>
+                  <Button
+                    type="button"
+                    onClick={() => void handleKeepLocal(conflict)}
+                  >
+                    Conservar lo mío
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
 
         {isOnline && (
           <Button
