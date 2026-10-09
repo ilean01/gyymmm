@@ -83,6 +83,7 @@ export interface PlannedWorkoutSet {
   actualReps: number | null
   durationSeconds: number | null
   completedAt: string | null
+  deletedAt?: string | null
   isExtra: boolean
   rev: number
   syncState: SyncState
