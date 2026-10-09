@@ -118,10 +118,16 @@ export interface ProgressiveOverloadSuggestion {
   message: string
 }
 
+export interface ExerciseRecordBaselines {
+  maxWeightKg: number
+  maxReps: number
+  maxVolumeKg: number
+}
+
 export interface WorkoutPersonalRecord {
   exerciseId: string
   exerciseName: string
-  kind: 'weight'
+  kind: 'weight' | 'reps' | 'volume'
   previousValue: number
   newValue: number
 }
