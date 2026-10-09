@@ -1,0 +1,67 @@
+name: Verify GymBro Production
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/verify-production.yml
+
+permissions:
+  contents: read
+
+jobs:
+  verify-production:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Verify deployed GitHub Pages
+        shell: bash
+        run: |
+          set -euo pipefail
+          PAGE='https://ilean01.github.io/gyymmm/'
+          curl --fail --silent --show-error --location --retry 3 --max-time 20 "$PAGE" -o /tmp/gymbro-page.html
+          grep -qi 'GymBro' /tmp/gymbro-page.html
+          echo "Pages: HTTP 200, GymBro HTML present" >> "$GITHUB_STEP_SUMMARY"
+          curl --fail --silent --show-error --location --retry 3 --max-time 20 "${PAGE}manifest.webmanifest" -o /tmp/gymbro-manifest.json
+          jq -e '.name == "GymBro" and .start_url == "/gyymmm/" and .display == "standalone"' /tmp/gymbro-manifest.json >/dev/null
+          echo "PWA manifest: valid" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Verify deployed API and D1 migrations
+        shell: bash
+        run: |
+          set -euo pipefail
+          API='https://gymbro-api.ileanasanabria14.workers.dev'
+          curl --fail --silent --show-error --location --retry 3 --max-time 20 "$API/health" -o /tmp/gymbro-health.json
+          jq -e '.ok == true and .authReady == true and .databaseReady == true and .schemaReady == true and .latestMigration == "0010_exercise_images.sql"' /tmp/gymbro-health.json >/dev/null || {
+            echo 'API health is not ready or D1 is not at the required migration.'
+            jq '{ok, authReady, databaseReady, schemaReady, latestMigration}' /tmp/gymbro-health.json
+            exit 1
+          }
+          echo "API: healthy, auth configured and D1 migrations current" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Verify authentication boundary and CORS
+        shell: bash
+        run: |
+          set -euo pipefail
+          API='https://gymbro-api.ileanasanabria14.workers.dev'
+          status=$(curl --silent --show-error --output /tmp/gymbro-private.json --write-out '%{http_code}' --max-time 20 "$API/api/v1/me")
+          if [ "$status" != "401" ]; then
+            echo "A private route returned HTTP $status instead of 401"
+            exit 1
+          fi
+          allowed=$(curl --silent --show-error --output /dev/null --dump-header /tmp/gymbro-cors-allowed.txt --write-out '%{http_code}' --max-time 20 -X OPTIONS "$API/api/v1/sync/status" -H 'Origin: https://ilean01.github.io' -H 'Access-Control-Request-Method: GET')
+          if [ "$allowed" != "204" ] && [ "$allowed" != "200" ]; then
+            echo "CORS preflight returned HTTP $allowed"
+            exit 1
+          fi
+          tr -d '\r' < /tmp/gymbro-cors-allowed.txt | grep -iq '^access-control-allow-origin: https://ilean01.github.io$' || {
+            echo 'Expected CORS allow-origin not returned for Pages'
+            exit 1
+          }
+          curl --silent --show-error --output /dev/null --dump-header /tmp/gymbro-cors-denied.txt --max-time 20 -X OPTIONS "$API/api/v1/sync/status" -H 'Origin: https://invalid.example' -H 'Access-Control-Request-Method: GET'
+          if tr -d '\r' < /tmp/gymbro-cors-denied.txt | grep -iq '^access-control-allow-origin: https://invalid.example$'; then
+            echo 'Unexpected CORS origin allowed'
+            exit 1
+          fi
+          echo "Security: protected route rejects anonymous requests; CORS origin restricted" >> "$GITHUB_STEP_SUMMARY"
