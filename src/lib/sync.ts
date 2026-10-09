@@ -309,6 +309,7 @@ async function runSync(): Promise<SyncSummary> {
     const domain = await syncDomainOutbox(queue)
     summary.synced += domain.synced
     summary.failed += domain.failed
+    summary.conflicts += domain.conflicts
 
     const pushed = await pushPendingChanges(workoutQueue)
     summary.synced += pushed.synced
