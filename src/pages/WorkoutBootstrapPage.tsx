@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { PageSection } from '../components/layout/AppShell'
 import {
@@ -69,7 +69,10 @@ function formatDuration(totalSeconds: number): string {
     .join(':')
 }
 
-function remainingFromRest(state: RestTimerState | null): number {
+function remainingFromRest(
+  state: RestTimerState | null,
+  now = Date.now(),
+): number {
   if (!state) return 0
 
   if (state.status === 'paused') {
@@ -81,7 +84,7 @@ function remainingFromRest(state: RestTimerState | null): number {
   return Math.max(
     0,
     Math.ceil(
-      (new Date(state.endsAt).getTime() - Date.now()) / 1000,
+      (new Date(state.endsAt).getTime() - now) / 1000,
     ),
   )
 }
@@ -172,29 +175,30 @@ export function WorkoutBootstrapPage() {
     session?.status === 'active',
   )
 
-  async function loadHistory(
-    workoutExercises: WorkoutExercise[],
-  ) {
-    if (!id) return
+  const loadHistory = useCallback(
+    async (workoutExercises: WorkoutExercise[]) => {
+      if (!id) return
 
-    const entries = await Promise.all(
-      Array.from(
-        new Map(
-          workoutExercises.map((exercise) => [
-            exercise.exerciseId,
-            exercise,
-          ]),
-        ).values(),
-      ).map(async (exercise) => [
-        exercise.exerciseId,
-        await getExerciseLastPerformance(exercise.exerciseId, id),
-      ] as const),
-    )
+      const entries = await Promise.all(
+        Array.from(
+          new Map(
+            workoutExercises.map((exercise) => [
+              exercise.exerciseId,
+              exercise,
+            ]),
+          ).values(),
+        ).map(async (exercise) => [
+          exercise.exerciseId,
+          await getExerciseLastPerformance(exercise.exerciseId, id),
+        ] as const),
+      )
 
-    setHistory(Object.fromEntries(entries))
-  }
+      setHistory(Object.fromEntries(entries))
+    },
+    [id],
+  )
 
-  async function reloadWorkout() {
+  const reloadWorkout = useCallback(async () => {
     if (!id) return
 
     const [storedSession, storedExercises, storedSets] = await Promise.all([
@@ -207,7 +211,7 @@ export function WorkoutBootstrapPage() {
     setExercises(storedExercises)
     setSets(storedSets)
     await loadHistory(storedExercises)
-  }
+  }, [id, loadHistory])
 
   useEffect(() => {
     const load = async () => {
@@ -252,7 +256,7 @@ export function WorkoutBootstrapPage() {
     }
 
     void load()
-  }, [id])
+  }, [id, reloadWorkout])
 
   useEffect(() => {
     const timer = window.setInterval(() => {
@@ -285,7 +289,7 @@ export function WorkoutBootstrapPage() {
       document.removeEventListener('visibilitychange', handleVisibility)
       window.removeEventListener('online', handleOnline)
     }
-  }, [id])
+  }, [reloadWorkout])
 
   const elapsedSeconds = useMemo(() => {
     if (!session) return 0
@@ -340,7 +344,7 @@ export function WorkoutBootstrapPage() {
   )
 
   const remainingRestSeconds = useMemo(
-    () => remainingFromRest(restState),
+    () => remainingFromRest(restState, tick),
     [restState, tick],
   )
 
