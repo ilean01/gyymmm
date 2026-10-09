@@ -10,6 +10,7 @@ import { BUILTIN_EXERCISES, createInitialRoutine } from '../data/exercises'
 import type {
   Exercise,
   ExerciseLastPerformance,
+  ExerciseRecordBaselines,
   PlannedWorkoutSet,
   RestTimerState,
   Routine,
@@ -850,6 +851,65 @@ export async function getExerciseLastPerformance(
   }
 
   return null
+}
+
+export async function getPreviousExerciseRecords(
+  exerciseId: string,
+  currentSessionId: string,
+): Promise<ExerciseRecordBaselines> {
+  const [sessions, allSets] = await Promise.all([
+    getWorkoutSessions(),
+    getAllPlannedWorkoutSets(),
+  ])
+
+  const validSessions = sessions.filter(
+    (session) =>
+      session.id !== currentSessionId &&
+      session.status === 'completed' &&
+      !session.abandonedAt,
+  )
+  const validSessionIds = new Set(validSessions.map((session) => session.id))
+  const exerciseSets = allSets.filter(
+    (set) =>
+      set.exerciseId === exerciseId &&
+      validSessionIds.has(set.sessionId) &&
+      set.completedAt !== null,
+  )
+
+  const maxWeightKg = exerciseSets.reduce(
+    (best, set) => Math.max(best, set.actualWeightKg ?? 0),
+    0,
+  )
+  const maxReps = exerciseSets.reduce(
+    (best, set) => Math.max(best, set.actualReps ?? 0),
+    0,
+  )
+
+  const volumeBySession = new Map<string, number>()
+
+  for (const set of exerciseSets) {
+    if (
+      set.targetSeconds !== null ||
+      typeof set.actualWeightKg !== 'number' ||
+      typeof set.actualReps !== 'number'
+    ) {
+      continue
+    }
+
+    volumeBySession.set(
+      set.sessionId,
+      (volumeBySession.get(set.sessionId) ?? 0) +
+        set.actualWeightKg * set.actualReps,
+    )
+  }
+
+  const maxVolumeKg = Math.max(0, ...volumeBySession.values())
+
+  return {
+    maxWeightKg,
+    maxReps,
+    maxVolumeKg,
+  }
 }
 
 export async function getPreviousBestWeight(
