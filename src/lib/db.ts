@@ -781,6 +781,153 @@ export async function clearSyncConflict(
   }
 }
 
+function conflictStoreName(
+  entityType: SyncConflict['entityType'],
+): string {
+  switch (entityType) {
+    case 'workoutSession':
+      return STORES.sessions
+    case 'workoutSet':
+    case 'workoutPlanSet':
+      return STORES.sets
+    case 'exercise':
+      return STORES.exercises
+    case 'routine':
+      return STORES.routines
+    case 'workoutExercise':
+      return STORES.workoutExercises
+  }
+}
+
+async function getSyncConflictById(
+  conflictId: string,
+): Promise<SyncConflict | undefined> {
+  const db = await openGymBroDb()
+
+  try {
+    const transaction = db.transaction(STORES.conflicts, 'readonly')
+    const request = transaction.objectStore(STORES.conflicts).get(conflictId)
+    const conflict = (await requestToPromise(request)) as
+      | SyncConflict
+      | undefined
+    await transactionDone(transaction)
+    return conflict
+  } finally {
+    db.close()
+  }
+}
+
+export async function resolveSyncConflictWithServer(
+  conflictId: string,
+): Promise<void> {
+  const conflict = await getSyncConflictById(conflictId)
+
+  if (!conflict) return
+
+  const storeName = conflictStoreName(conflict.entityType)
+  const db = await openGymBroDb()
+
+  try {
+    const transaction = db.transaction(
+      [storeName, STORES.syncQueue, STORES.conflicts],
+      'readwrite',
+    )
+    const entityStore = transaction.objectStore(storeName)
+
+    if (conflict.serverPayload === null) {
+      entityStore.delete(conflict.entityId)
+    } else {
+      entityStore.put({
+        ...(conflict.serverPayload as Record<string, unknown>),
+        rev: conflict.serverRev,
+        syncState: 'synced',
+      })
+    }
+
+    transaction.objectStore(STORES.syncQueue).delete(conflict.id)
+    transaction.objectStore(STORES.conflicts).delete(conflict.id)
+    await transactionDone(transaction)
+  } finally {
+    db.close()
+  }
+}
+
+export async function resolveSyncConflictKeepLocal(
+  conflictId: string,
+): Promise<void> {
+  const conflict = await getSyncConflictById(conflictId)
+
+  if (!conflict) return
+
+  const storeName = conflictStoreName(conflict.entityType)
+  const db = await openGymBroDb()
+
+  try {
+    const readTransaction = db.transaction(
+      [storeName, STORES.syncQueue],
+      'readonly',
+    )
+    const entityRequest = readTransaction
+      .objectStore(storeName)
+      .get(conflict.entityId)
+    const queueRequest = readTransaction
+      .objectStore(STORES.syncQueue)
+      .get(conflict.id)
+    const [storedEntity, queuedItem] = await Promise.all([
+      requestToPromise(entityRequest),
+      requestToPromise(queueRequest),
+    ])
+    await transactionDone(readTransaction)
+
+    const now = new Date().toISOString()
+    const operation =
+      (queuedItem as SyncQueueItem | undefined)?.operation ?? 'upsert'
+    const localSource =
+      (storedEntity as Record<string, unknown> | undefined) ??
+      (conflict.localPayload as Record<string, unknown> | null) ??
+      {}
+    const rebasedPayload = {
+      ...localSource,
+      rev: conflict.serverRev,
+      syncState: 'pending',
+      updatedAt:
+        typeof localSource.updatedAt === 'string'
+          ? localSource.updatedAt
+          : now,
+    }
+    const nextQueueItem: SyncQueueItem = {
+      id: conflict.id,
+      mutationId: crypto.randomUUID(),
+      entityType: conflict.entityType,
+      entityId: conflict.entityId,
+      operation,
+      payload: rebasedPayload,
+      baseRev: conflict.serverRev,
+      status: 'pending',
+      createdAt:
+        (queuedItem as SyncQueueItem | undefined)?.createdAt ?? now,
+      updatedAt: now,
+      attempts: 0,
+      lastError: null,
+    }
+
+    const writeTransaction = db.transaction(
+      [storeName, STORES.syncQueue, STORES.conflicts],
+      'readwrite',
+    )
+
+    if (operation !== 'delete') {
+      writeTransaction.objectStore(storeName).put(rebasedPayload)
+    }
+
+    writeTransaction.objectStore(STORES.syncQueue).put(nextQueueItem)
+    writeTransaction.objectStore(STORES.conflicts).delete(conflict.id)
+    await transactionDone(writeTransaction)
+  } finally {
+    db.close()
+  }
+}
+
 export async function saveLocalProfile(
   user: AuthUser,
   profile: AuthProfile | null,
