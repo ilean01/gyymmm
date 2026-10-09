@@ -225,8 +225,12 @@ export async function pullDomainCatalog(): Promise<{
   routines: number
 }> {
   const [exerciseResponse, routineResponse] = await Promise.all([
-    apiRequest<{ ok: true; exercises: Exercise[] }>('/api/v1/exercises'),
-    apiRequest<{ ok: true; routines: Routine[] }>('/api/v1/routines'),
+    apiRequest<{ ok: true; exercises: Exercise[] }>(
+      '/api/v1/exercises?includeArchived=1',
+    ),
+    apiRequest<{ ok: true; routines: Routine[] }>(
+      '/api/v1/routines?includeArchived=1',
+    ),
   ])
 
   const [exercises, routines] = await Promise.all([
