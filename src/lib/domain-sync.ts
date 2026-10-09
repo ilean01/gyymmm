@@ -17,7 +17,7 @@ import type { SyncQueueItem } from '../types/training'
 
 export async function syncDomainOutbox(
   queue: SyncQueueItem[],
-): Promise<{ synced: number; failed: number }> {
+): Promise<{ synced: number; failed: number; conflicts: number }> {
   const items = queue
     .filter(
       (item) =>
@@ -30,6 +30,7 @@ export async function syncDomainOutbox(
 
   let synced = 0
   let failed = 0
+  let conflicts = 0
 
   for (const item of items) {
     try {
@@ -38,7 +39,7 @@ export async function syncDomainOutbox(
       if (item.entityType === 'exercise') {
         if (item.operation === 'delete') {
           const response = await apiRequest<{ ok: true; rev: number }>(
-            `/api/v1/exercises/${encodeURIComponent(item.entityId)}`,
+            `/api/v1/exercises/${encodeURIComponent(item.entityId)}?rev=${item.baseRev}`,
             { method: 'DELETE' },
           )
           resultingRev = response.rev
@@ -62,7 +63,7 @@ export async function syncDomainOutbox(
       } else {
         if (item.operation === 'delete') {
           const response = await apiRequest<{ ok: true; rev: number }>(
-            `/api/v1/routines/${encodeURIComponent(item.entityId)}`,
+            `/api/v1/routines/${encodeURIComponent(item.entityId)}?rev=${item.baseRev}`,
             { method: 'DELETE' },
           )
           resultingRev = response.rev
@@ -88,6 +89,25 @@ export async function syncDomainOutbox(
       await markDomainSyncSuccess(item, resultingRev)
       synced += 1
     } catch (error) {
+      if (
+        error instanceof ApiError &&
+        error.status === 409 &&
+        error.code === 'sync_conflict'
+      ) {
+        const serverRev =
+          typeof error.details?.serverRev === 'number'
+            ? error.details.serverRev
+            : item.baseRev
+
+        await markDomainSyncConflict(
+          item,
+          serverRev,
+          error.details?.serverPayload ?? null,
+        )
+        conflicts += 1
+        continue
+      }
+
       await markDomainSyncFailure(
         item,
         error instanceof Error
@@ -98,7 +118,7 @@ export async function syncDomainOutbox(
     }
   }
 
-  return { synced, failed }
+  return { synced, failed, conflicts }
 }
 
 
