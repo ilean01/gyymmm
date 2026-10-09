@@ -7,6 +7,18 @@ const required = [
   'dist/pwa-512x512.png',
   'dist/maskable-512x512.png',
   'dist/apple-touch-icon.png',
+  'dist/exercises/hip-thrust.svg',
+  'dist/exercises/bulgaras.svg',
+  'dist/exercises/peso-muerto-rumano.svg',
+  'dist/exercises/peso-muerto-una-pierna.svg',
+  'dist/exercises/femoral.svg',
+  'dist/exercises/plancha-frontal.svg',
+  'dist/exercises/crunch.svg',
+  'dist/exercises/sentadilla.svg',
+  'dist/exercises/prensa-piernas.svg',
+  'dist/exercises/elevacion-gemelos.svg',
+  'dist/exercises/remo-sentado.svg',
+  'dist/exercises/press-pecho.svg',
 ]
 
 for (const path of required) {
@@ -17,7 +29,13 @@ const manifest = JSON.parse(
   await readFile('dist/manifest.webmanifest', 'utf8'),
 )
 
+const serviceWorker = await readFile('dist/sw.js', 'utf8')
+
 const problems = []
+
+if (!serviceWorker.includes('exercises/hip-thrust.svg')) {
+  problems.push('exercise illustrations are not precached')
+}
 
 if (manifest.name !== 'GymBro') problems.push('manifest.name')
 if (manifest.start_url !== '/gyymmm/') problems.push('manifest.start_url')
