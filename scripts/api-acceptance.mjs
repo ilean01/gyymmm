@@ -669,6 +669,75 @@ assert(
   'stale planned set must not overwrite silently',
 )
 
+const archivedExercise = await request(
+  '/api/v1/exercises/' + deviceExerciseId + '?rev=2',
+  {
+    method: 'DELETE',
+    token: userA.token,
+  },
+)
+assert(
+  archivedExercise.response.status === 200,
+  'device A must archive exercise at current revision',
+)
+
+const deviceBActiveExercisesAfterArchive = await request('/api/v1/exercises', {
+  token: userAToken,
+})
+assert(
+  !deviceBActiveExercisesAfterArchive.json.exercises.some(
+    (item) => item.id === deviceExerciseId,
+  ),
+  'archived exercise must disappear from active catalog on device B',
+)
+
+const deviceBFullExercisesAfterArchive = await request(
+  '/api/v1/exercises?includeArchived=1',
+  { token: userAToken },
+)
+const archivedExerciseSeen = deviceBFullExercisesAfterArchive.json.exercises.find(
+  (item) => item.id === deviceExerciseId,
+)
+assert(
+  archivedExerciseSeen?.archivedAt,
+  'archived exercise tombstone must be available to second-device sync',
+)
+
+const archivedRoutine = await request(
+  '/api/v1/routines/' + deviceRoutineId + '?rev=2',
+  {
+    method: 'DELETE',
+    token: userA.token,
+  },
+)
+assert(
+  archivedRoutine.response.status === 200,
+  'device A must archive routine at current revision',
+)
+
+const deviceBActiveRoutinesAfterArchive = await request('/api/v1/routines', {
+  token: userAToken,
+})
+assert(
+  !deviceBActiveRoutinesAfterArchive.json.routines.some(
+    (item) => item.id === deviceRoutineId,
+  ),
+  'archived routine must disappear from active catalog on device B',
+)
+
+const deviceBFullRoutinesAfterArchive = await request(
+  '/api/v1/routines?includeArchived=1',
+  { token: userAToken },
+)
+assert(
+  deviceBFullRoutinesAfterArchive.json.routines.some(
+    (item) =>
+      item.id === deviceRoutineId &&
+      item.status === 'archived',
+  ),
+  'archived routine tombstone must be available to second-device sync',
+)
+
 const allowedCors = await fetch(baseUrl + '/api/v1/sync/status', {
   method: 'OPTIONS',
   headers: {
