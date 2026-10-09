@@ -1,5 +1,6 @@
 import type {
   ExerciseLastPerformance,
+  ExerciseRecordBaselines,
   PlannedWorkoutSet,
   ProgressiveOverloadSuggestion,
   WorkoutExercise,
@@ -113,46 +114,88 @@ export function calculateWorkoutVolume(
     )
 }
 
-export function detectWeightRecords(
+export function detectPersonalRecords(
   sets: PlannedWorkoutSet[],
-  previousBest: Map<string, number>,
+  previousBest: Map<string, ExerciseRecordBaselines>,
 ): WorkoutPersonalRecord[] {
-  const currentBest = new Map<
+  const current = new Map<
     string,
-    { name: string; weight: number }
+    {
+      name: string
+      maxWeightKg: number
+      maxReps: number
+      volumeKg: number
+    }
   >()
 
   for (const set of sets) {
+    if (set.completedAt === null) continue
+
+    const metrics = current.get(set.exerciseId) ?? {
+      name: set.exerciseName,
+      maxWeightKg: 0,
+      maxReps: 0,
+      volumeKg: 0,
+    }
+
+    if (typeof set.actualWeightKg === 'number') {
+      metrics.maxWeightKg = Math.max(
+        metrics.maxWeightKg,
+        set.actualWeightKg,
+      )
+    }
+
+    if (typeof set.actualReps === 'number') {
+      metrics.maxReps = Math.max(metrics.maxReps, set.actualReps)
+    }
+
     if (
-      set.completedAt === null ||
-      typeof set.actualWeightKg !== 'number' ||
-      set.actualWeightKg <= 0
+      set.targetSeconds === null &&
+      typeof set.actualWeightKg === 'number' &&
+      typeof set.actualReps === 'number'
     ) {
-      continue
+      metrics.volumeKg += set.actualWeightKg * set.actualReps
     }
 
-    const current = currentBest.get(set.exerciseId)
-
-    if (!current || set.actualWeightKg > current.weight) {
-      currentBest.set(set.exerciseId, {
-        name: set.exerciseName,
-        weight: set.actualWeightKg,
-      })
-    }
+    current.set(set.exerciseId, metrics)
   }
 
   const records: WorkoutPersonalRecord[] = []
 
-  for (const [exerciseId, best] of currentBest) {
-    const previous = previousBest.get(exerciseId) ?? 0
+  for (const [exerciseId, metrics] of current) {
+    const previous = previousBest.get(exerciseId) ?? {
+      maxWeightKg: 0,
+      maxReps: 0,
+      maxVolumeKg: 0,
+    }
 
-    if (best.weight > previous) {
+    if (metrics.maxWeightKg > previous.maxWeightKg) {
       records.push({
         exerciseId,
-        exerciseName: best.name,
+        exerciseName: metrics.name,
         kind: 'weight',
-        previousValue: previous,
-        newValue: best.weight,
+        previousValue: previous.maxWeightKg,
+        newValue: metrics.maxWeightKg,
+      })
+    }
+
+    if (metrics.maxReps > previous.maxReps) {
+      records.push({
+        exerciseId,
+        exerciseName: metrics.name,
+        kind: 'reps',
+        previousValue: previous.maxReps,
+        newValue: metrics.maxReps,
+      })
+    }
+
+    if (metrics.volumeKg > previous.maxVolumeKg) {
+      records.push({
+        exerciseId,
+        exerciseName: metrics.name,
+        kind: 'volume',
+        previousValue: previous.maxVolumeKg,
+        newValue: metrics.volumeKg,
       })
     }
   }
