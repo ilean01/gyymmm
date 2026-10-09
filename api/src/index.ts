@@ -2503,6 +2503,7 @@ app.put('/api/v1/workout-plan-sets/:id', requireAuth, async (c) => {
               actualReps: existing.reps,
               durationSeconds: existing.duration_seconds,
               completedAt: existing.completed_at,
+              deletedAt: existing.deleted_at,
               isExtra: existing.is_extra === 1,
               rev: existing.rev,
               updatedAt: existing.updated_at,
@@ -2664,10 +2665,10 @@ app.delete('/api/v1/workout-plan-sets/:id', requireAuth, async (c) => {
 
   const existing = await c.env.gymbro_db
     .prepare(
-      'SELECT rev FROM workout_sets WHERE id = ? AND user_id = ?',
+      'SELECT * FROM workout_sets WHERE id = ? AND user_id = ?',
     )
     .bind(c.req.param('id'), userId)
-    .first<{ rev: number }>()
+    .first<WorkoutSetRow>()
 
   if (!existing) {
     return c.json({ ok: true, rev: baseRev })
@@ -2680,7 +2681,25 @@ app.delete('/api/v1/workout-plan-sets/:id', requireAuth, async (c) => {
         error: 'sync_conflict',
         message: 'La serie fue modificada en otro dispositivo.',
         serverRev: existing.rev,
-        serverPayload: null,
+        serverPayload: {
+          id: existing.id,
+          sessionId: existing.session_id,
+          workoutExerciseId: existing.workout_exercise_id,
+          exerciseId: existing.exercise_id,
+          exerciseName: existing.exercise_name,
+          setNumber: existing.set_number,
+          targetWeightKg: existing.target_weight_kg,
+          targetReps: existing.target_reps,
+          targetSeconds: existing.target_seconds,
+          actualWeightKg: existing.weight_kg,
+          actualReps: existing.reps,
+          durationSeconds: existing.duration_seconds,
+          completedAt: existing.completed_at,
+          deletedAt: existing.deleted_at,
+          isExtra: existing.is_extra === 1,
+          rev: existing.rev,
+          updatedAt: existing.updated_at,
+        },
       },
       409,
     )
