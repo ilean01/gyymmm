@@ -45,7 +45,7 @@ jobs:
         run: |
           set -euo pipefail
           API='https://gymbro-api.ileanasanabria14.workers.dev'
-          status=$(curl --silent --show-error --output /tmp/gymbro-private.json --write-out '%{http_code}' --max-time 20 "$API/api/v1/me")
+          status=$(curl --silent --show-error --output /tmp/gymbro-private.json --write-out '%{http_code}' --max-time 20 "$API/api/v1/auth/me")
           if [ "$status" != "401" ]; then
             echo "A private route returned HTTP $status instead of 401"
             exit 1
