@@ -4,8 +4,10 @@ export const PBKDF2_HASH = 'SHA-256'
 export const PBKDF2_KEY_LENGTH_BITS = 256
 export const PBKDF2_SALT_BYTES = 16
 
-// Valor inicial para el benchmark del punto 29.
-// No lo consideramos definitivo hasta medir CPU real en Workers.
+// Verificado en el runtime de Cloudflare Workers usado por GymBro:
+// 100.000 iteraciones funciona y valores superiores fueron rechazados por
+// Web Crypto en la prueba remota. Se mantiene el máximo compatible verificado
+// y nunca se reduce silenciosamente.
 export const PBKDF2_DEFAULT_ITERATIONS = 100_000
 
 export interface PasswordHashResult {
