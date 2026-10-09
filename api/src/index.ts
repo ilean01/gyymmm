@@ -1728,7 +1728,11 @@ app.put('/api/v1/exercises/:id', requireAuth, async (c) => {
 
   if (!validateExercise(input) || input.id !== c.req.param('id')) {
     return c.json(
-      { ok: false, error: 'invalid_exercise', message: 'El ejercicio no es válido.' },
+      {
+        ok: false,
+        error: 'invalid_exercise',
+        message: 'El ejercicio no es válido.',
+      },
       400,
     )
   }
@@ -1742,17 +1746,39 @@ app.put('/api/v1/exercises/:id', requireAuth, async (c) => {
     .first<ExerciseRow>()
 
   if (!existing) {
-    return c.json({ ok: false, error: 'not_found', message: 'El ejercicio no existe.' }, 404)
+    return c.json(
+      {
+        ok: false,
+        error: 'not_found',
+        message: 'El ejercicio no existe.',
+      },
+      404,
+    )
   }
 
-  const nextRev = existing.rev + 1
+  const baseRev = input.rev ?? 0
+
+  if (existing.rev !== baseRev) {
+    return c.json(
+      {
+        ok: false,
+        error: 'sync_conflict',
+        message: 'El ejercicio fue modificado en otro dispositivo.',
+        serverRev: existing.rev,
+        serverPayload: exerciseRowToApi(existing),
+      },
+      409,
+    )
+  }
+
+  const nextRev = baseRev + 1
   const now = new Date().toISOString()
   await c.env.gymbro_db
     .prepare(
       `UPDATE exercises
        SET name = ?, muscle_group = ?, equipment = ?, instructions = ?,
            image_path = ?, archived_at = NULL, rev = ?, updated_at = ?
-       WHERE id = ? AND owner_user_id = ?`,
+       WHERE id = ? AND owner_user_id = ? AND rev = ?`,
     )
     .bind(
       input.name,
@@ -1764,14 +1790,26 @@ app.put('/api/v1/exercises/:id', requireAuth, async (c) => {
       now,
       input.id,
       userId,
+      baseRev,
     )
     .run()
 
-  return c.json({ ok: true, exercise: { ...input, ownerUserId: userId, isBuiltin: false, archivedAt: null, rev: nextRev, updatedAt: now } })
+  return c.json({
+    ok: true,
+    exercise: {
+      ...input,
+      ownerUserId: userId,
+      isBuiltin: false,
+      archivedAt: null,
+      rev: nextRev,
+      updatedAt: now,
+    },
+  })
 })
 
 app.delete('/api/v1/exercises/:id', requireAuth, async (c) => {
   const userId = c.get('userId')
+  const baseRev = Number(c.req.query('rev') ?? '-1')
   const now = new Date().toISOString()
   const existing = await c.env.gymbro_db
     .prepare(
@@ -1781,15 +1819,48 @@ app.delete('/api/v1/exercises/:id', requireAuth, async (c) => {
     .first<ExerciseRow>()
 
   if (!existing) {
-    return c.json({ ok: false, error: 'not_found', message: 'El ejercicio no existe.' }, 404)
+    return c.json(
+      {
+        ok: false,
+        error: 'not_found',
+        message: 'El ejercicio no existe.',
+      },
+      404,
+    )
   }
 
-  const nextRev = existing.rev + 1
+  if (!Number.isInteger(baseRev) || baseRev < 0) {
+    return c.json(
+      {
+        ok: false,
+        error: 'invalid_rev',
+        message: 'La revisión del ejercicio no es válida.',
+      },
+      400,
+    )
+  }
+
+  if (existing.rev !== baseRev) {
+    return c.json(
+      {
+        ok: false,
+        error: 'sync_conflict',
+        message: 'El ejercicio fue modificado en otro dispositivo.',
+        serverRev: existing.rev,
+        serverPayload: exerciseRowToApi(existing),
+      },
+      409,
+    )
+  }
+
+  const nextRev = baseRev + 1
   await c.env.gymbro_db
     .prepare(
-      'UPDATE exercises SET archived_at = ?, rev = ?, updated_at = ? WHERE id = ? AND owner_user_id = ?',
+      `UPDATE exercises
+       SET archived_at = ?, rev = ?, updated_at = ?
+       WHERE id = ? AND owner_user_id = ? AND rev = ?`,
     )
-    .bind(now, nextRev, now, existing.id, userId)
+    .bind(now, nextRev, now, existing.id, userId, baseRev)
     .run()
 
   return c.json({ ok: true, rev: nextRev })
@@ -1856,7 +1927,14 @@ app.put('/api/v1/routines/:id', requireAuth, async (c) => {
   const input = await c.req.json<unknown>().catch(() => null)
 
   if (!validateRoutine(input) || input.id !== c.req.param('id')) {
-    return c.json({ ok: false, error: 'invalid_routine', message: 'La rutina no es válida.' }, 400)
+    return c.json(
+      {
+        ok: false,
+        error: 'invalid_routine',
+        message: 'La rutina no es válida.',
+      },
+      400,
+    )
   }
 
   const userId = c.get('userId')
@@ -1866,38 +1944,111 @@ app.put('/api/v1/routines/:id', requireAuth, async (c) => {
     .first<{ rev: number }>()
 
   if (!existing) {
-    return c.json({ ok: false, error: 'not_found', message: 'La rutina no existe.' }, 404)
+    return c.json(
+      {
+        ok: false,
+        error: 'not_found',
+        message: 'La rutina no existe.',
+      },
+      404,
+    )
+  }
+
+  const baseRev = input.rev ?? 0
+
+  if (existing.rev !== baseRev) {
+    return c.json(
+      {
+        ok: false,
+        error: 'sync_conflict',
+        message: 'La rutina fue modificada en otro dispositivo.',
+        serverRev: existing.rev,
+        serverPayload: await getRoutineAggregate(
+          c.env.gymbro_db,
+          userId,
+          input.id,
+        ),
+      },
+      409,
+    )
   }
 
   const rev = await replaceRoutineAggregate(
     c.env.gymbro_db,
     userId,
     input,
-    existing.rev,
+    baseRev,
   )
-  const routine = await getRoutineAggregate(c.env.gymbro_db, userId, input.id)
+  const routine = await getRoutineAggregate(
+    c.env.gymbro_db,
+    userId,
+    input.id,
+  )
+
   return c.json({ ok: true, routine: { ...routine, rev } })
 })
 
 app.delete('/api/v1/routines/:id', requireAuth, async (c) => {
   const userId = c.get('userId')
+  const baseRev = Number(c.req.query('rev') ?? '-1')
   const existing = await c.env.gymbro_db
     .prepare('SELECT rev FROM routines WHERE id = ? AND user_id = ?')
     .bind(c.req.param('id'), userId)
     .first<{ rev: number }>()
 
   if (!existing) {
-    return c.json({ ok: false, error: 'not_found', message: 'La rutina no existe.' }, 404)
+    return c.json(
+      {
+        ok: false,
+        error: 'not_found',
+        message: 'La rutina no existe.',
+      },
+      404,
+    )
   }
 
-  const nextRev = existing.rev + 1
+  if (!Number.isInteger(baseRev) || baseRev < 0) {
+    return c.json(
+      {
+        ok: false,
+        error: 'invalid_rev',
+        message: 'La revisión de la rutina no es válida.',
+      },
+      400,
+    )
+  }
+
+  if (existing.rev !== baseRev) {
+    return c.json(
+      {
+        ok: false,
+        error: 'sync_conflict',
+        message: 'La rutina fue modificada en otro dispositivo.',
+        serverRev: existing.rev,
+        serverPayload: await getRoutineAggregate(
+          c.env.gymbro_db,
+          userId,
+          c.req.param('id'),
+        ),
+      },
+      409,
+    )
+  }
+
+  const nextRev = baseRev + 1
   await c.env.gymbro_db
     .prepare(
       `UPDATE routines
        SET status = 'archived', rev = ?, updated_at = ?
-       WHERE id = ? AND user_id = ?`,
+       WHERE id = ? AND user_id = ? AND rev = ?`,
     )
-    .bind(nextRev, new Date().toISOString(), c.req.param('id'), userId)
+    .bind(
+      nextRev,
+      new Date().toISOString(),
+      c.req.param('id'),
+      userId,
+      baseRev,
+    )
     .run()
 
   return c.json({ ok: true, rev: nextRev })
