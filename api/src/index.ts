@@ -2708,6 +2708,155 @@ app.delete('/api/v1/workout-plan-sets/:id', requireAuth, async (c) => {
   return c.json({ ok: true, rev: nextRev })
 })
 
+app.get('/api/v1/sync/domain', requireAuth, async (c) => {
+  const since =
+    c.req.query('since') ?? '1970-01-01T00:00:00.000Z'
+
+  if (!isIsoDate(since)) {
+    return c.json(
+      {
+        ok: false,
+        error: 'invalid_since',
+        message: 'El cursor temporal de sincronización no es válido.',
+      },
+      400,
+    )
+  }
+
+  const userId = c.get('userId')
+  const watermark = new Date().toISOString()
+
+  const [exerciseResult, routineRows, workoutExerciseResult, plannedSetResult] =
+    await Promise.all([
+      c.env.gymbro_db
+        .prepare(
+          `SELECT *
+           FROM exercises
+           WHERE (is_builtin = 1 OR owner_user_id = ?)
+             AND julianday(updated_at) > julianday(?)
+             AND julianday(updated_at) <= julianday(?)
+           ORDER BY updated_at ASC`,
+        )
+        .bind(userId, since, watermark)
+        .all<ExerciseRow>(),
+      c.env.gymbro_db
+        .prepare(
+          `SELECT id
+           FROM routines
+           WHERE user_id = ?
+             AND julianday(updated_at) > julianday(?)
+             AND julianday(updated_at) <= julianday(?)
+           ORDER BY updated_at ASC`,
+        )
+        .bind(userId, since, watermark)
+        .all<{ id: string }>(),
+      c.env.gymbro_db
+        .prepare(
+          `SELECT
+            we.id,
+            we.session_id,
+            we.source_routine_exercise_id,
+            we.exercise_id,
+            we.exercise_name,
+            we.position,
+            we.status,
+            we.notes,
+            we.rest_seconds,
+            we.replaced_exercise_id,
+            we.rev,
+            we.updated_at
+           FROM workout_exercises we
+           JOIN workout_sessions ws ON ws.id = we.session_id
+           WHERE ws.user_id = ?
+             AND ws.deleted_at IS NULL
+             AND julianday(we.updated_at) > julianday(?)
+             AND julianday(we.updated_at) <= julianday(?)
+           ORDER BY we.updated_at ASC`,
+        )
+        .bind(userId, since, watermark)
+        .all<{
+          id: string
+          session_id: string
+          source_routine_exercise_id: string | null
+          exercise_id: string
+          exercise_name: string
+          position: number
+          status: 'pending' | 'active' | 'completed' | 'skipped'
+          notes: string | null
+          rest_seconds: number | null
+          replaced_exercise_id: string | null
+          rev: number
+          updated_at: string
+        }>(),
+      c.env.gymbro_db
+        .prepare(
+          `SELECT ws.*
+           FROM workout_sets ws
+           JOIN workout_sessions session ON session.id = ws.session_id
+           WHERE ws.user_id = ?
+             AND ws.workout_exercise_id IS NOT NULL
+             AND session.deleted_at IS NULL
+             AND julianday(ws.updated_at) > julianday(?)
+             AND julianday(ws.updated_at) <= julianday(?)
+           ORDER BY ws.updated_at ASC`,
+        )
+        .bind(userId, since, watermark)
+        .all<WorkoutSetRow>(),
+    ])
+
+  const routines = []
+
+  for (const row of routineRows.results ?? []) {
+    const routine = await getRoutineAggregate(
+      c.env.gymbro_db,
+      userId,
+      row.id,
+    )
+
+    if (routine) routines.push(routine)
+  }
+
+  return c.json({
+    ok: true,
+    cursor: watermark,
+    exercises: (exerciseResult.results ?? []).map(exerciseRowToApi),
+    routines,
+    workoutExercises: (workoutExerciseResult.results ?? []).map((row) => ({
+      id: row.id,
+      sessionId: row.session_id,
+      sourceRoutineExerciseId: row.source_routine_exercise_id,
+      exerciseId: row.exercise_id,
+      exerciseName: row.exercise_name,
+      position: row.position,
+      status: row.status,
+      notes: row.notes,
+      restSeconds: row.rest_seconds,
+      replacedExerciseId: row.replaced_exercise_id,
+      rev: row.rev,
+      updatedAt: row.updated_at,
+    })),
+    plannedSets: (plannedSetResult.results ?? []).map((row) => ({
+      id: row.id,
+      sessionId: row.session_id,
+      workoutExerciseId: row.workout_exercise_id as string,
+      exerciseId: row.exercise_id,
+      exerciseName: row.exercise_name,
+      setNumber: row.set_number,
+      targetWeightKg: row.target_weight_kg,
+      targetReps: row.target_reps,
+      targetSeconds: row.target_seconds,
+      actualWeightKg: row.weight_kg,
+      actualReps: row.reps,
+      durationSeconds: row.duration_seconds,
+      completedAt: row.completed_at,
+      deletedAt: row.deleted_at,
+      isExtra: row.is_extra === 1,
+      rev: row.rev,
+      updatedAt: row.updated_at,
+    })),
+  })
+})
+
 app.post('/api/v1/sync/push', requireAuth, async (c) => {
   const body = await c.req.json<unknown>().catch(() => null)
 
