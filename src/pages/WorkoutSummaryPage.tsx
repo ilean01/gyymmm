@@ -21,6 +21,22 @@ function formatDuration(totalSeconds: number): string {
     .join(':')
 }
 
+function recordMetricLabel(
+  kind: WorkoutSummary['personalRecords'][number]['kind'],
+): string {
+  if (kind === 'weight') return 'Peso máximo'
+  if (kind === 'reps') return 'Repeticiones'
+  return 'Volumen'
+}
+
+function recordValue(
+  kind: WorkoutSummary['personalRecords'][number]['kind'],
+  value: number,
+): string {
+  if (kind === 'reps') return String(Math.round(value)) + ' reps'
+  return Math.round(value * 10) / 10 + ' kg'
+}
+
 export function WorkoutSummaryPage() {
   const { id } = useParams()
   const [summary, setSummary] = useState<WorkoutSummary | null>(null)
@@ -146,20 +162,28 @@ export function WorkoutSummaryPage() {
 
         {summary.personalRecords.length === 0 ? (
           <p className="mt-3 text-sm text-gym-muted">
-            No hubo un nuevo máximo de peso en esta sesión.
+            No hubo nuevos máximos de peso, repeticiones o volumen en esta sesión.
           </p>
         ) : (
           <div className="mt-4 space-y-2">
             {summary.personalRecords.map((record) => (
               <div
-                key={record.exerciseId}
+                key={record.exerciseId + ':' + record.kind}
                 className="rounded-gym border border-gym-border bg-gym-bg p-3"
               >
-                <p className="font-semibold">{record.exerciseName}</p>
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="font-semibold">{record.exerciseName}</p>
+                  <Badge tone="success">
+                    {recordMetricLabel(record.kind)}
+                  </Badge>
+                </div>
                 <p className="mt-1 text-sm text-gym-muted">
                   {record.previousValue > 0
-                    ? record.previousValue + ' kg → ' + record.newValue + ' kg'
-                    : 'Primer registro: ' + record.newValue + ' kg'}
+                    ? recordValue(record.kind, record.previousValue) +
+                      ' → ' +
+                      recordValue(record.kind, record.newValue)
+                    : 'Primer registro: ' +
+                      recordValue(record.kind, record.newValue)}
                 </p>
               </div>
             ))}
