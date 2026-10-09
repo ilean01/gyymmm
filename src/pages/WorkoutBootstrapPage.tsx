@@ -5,6 +5,7 @@ import {
   Badge,
   Button,
   Card,
+  Dialog,
   Input,
   NumberInput,
   ProgressBar,
@@ -164,6 +165,7 @@ export function WorkoutBootstrapPage() {
   const [toast, setToast] = useState('')
   const [message, setMessage] = useState('')
   const [showAbandonChoices, setShowAbandonChoices] = useState(false)
+  const [showFinishConfirm, setShowFinishConfirm] = useState(false)
   const [finishing, setFinishing] = useState(false)
 
   const wakeLockStatus = useWorkoutWakeLock(
@@ -1405,10 +1407,23 @@ export function WorkoutBootstrapPage() {
         className="mt-6"
         disabled={!canFinish}
         loading={finishing}
-        onClick={() => void handleFinishWorkout()}
+        onClick={() => setShowFinishConfirm(true)}
       >
         Finalizar entrenamiento
       </Button>
+
+      <Dialog
+        open={showFinishConfirm}
+        title="Finalizar entrenamiento"
+        description="Se cerrará la sesión, se calcularán duración, volumen y récords, y ya no aparecerá como entrenamiento activo."
+        confirmLabel="Sí, finalizar"
+        cancelLabel="Seguir entrenando"
+        onCancel={() => setShowFinishConfirm(false)}
+        onConfirm={() => {
+          setShowFinishConfirm(false)
+          void handleFinishWorkout()
+        }}
+      />
 
       {!canFinish && (
         <p className="mt-2 text-center text-xs text-gym-muted">
