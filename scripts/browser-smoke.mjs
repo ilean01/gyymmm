@@ -88,6 +88,7 @@ async function getTarget() {
 const target = await getTarget()
 const socket = new WebSocket(target.webSocketDebuggerUrl)
 const failures = []
+let offlineMode = false
 let nextId = 1
 const pending = new Map()
 
@@ -134,7 +135,10 @@ socket.addEventListener('message', (event) => {
 
   if (message.method === 'Network.loadingFailed') {
     const errorText = message.params?.errorText ?? 'resource failed'
-    if (!String(errorText).includes('ERR_ABORTED')) {
+    if (
+      !offlineMode &&
+      !String(errorText).includes('ERR_ABORTED')
+    ) {
       failures.push('network: ' + errorText)
     }
   }
@@ -189,6 +193,41 @@ if (swState.result.value !== 'ready') {
   failures.push('service worker not ready: ' + String(swState.result.value))
 }
 
+offlineMode = true
+await command('Network.emulateNetworkConditions', {
+  offline: true,
+  latency: 0,
+  downloadThroughput: 0,
+  uploadThroughput: 0,
+})
+await command('Page.reload', { ignoreCache: false })
+await sleep(1800)
+
+const offlineState = await command('Runtime.evaluate', {
+  expression: pageExpression,
+  returnByValue: true,
+})
+const parsedOfflineState = JSON.parse(offlineState.result.value)
+
+if (
+  !parsedOfflineState.bodyText
+    .toLocaleLowerCase('es')
+    .includes('iniciar sesión')
+) {
+  failures.push(
+    'offline reload did not render cached app shell; body=' +
+      JSON.stringify(parsedOfflineState.bodyText),
+  )
+}
+
+await command('Network.emulateNetworkConditions', {
+  offline: false,
+  latency: 0,
+  downloadThroughput: -1,
+  uploadThroughput: -1,
+})
+offlineMode = false
+
 socket.close()
 chrome.kill('SIGTERM')
 
@@ -203,4 +242,6 @@ if (failures.length > 0) {
   process.exit(1)
 }
 
-console.log('Browser smoke test: sin errores relevantes y service worker listo.')
+console.log(
+  'Browser smoke test: consola limpia, service worker listo y recarga offline correcta.',
+)
