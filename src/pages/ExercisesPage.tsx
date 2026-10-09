@@ -20,6 +20,15 @@ interface ExerciseFormState {
   instructions: string
 }
 
+function exerciseImageSrc(exercise: Exercise): string | null {
+  if (!exercise.imagePath) return null
+
+  return (
+    import.meta.env.BASE_URL +
+    exercise.imagePath.replace(/^\/+/, '')
+  )
+}
+
 const emptyForm: ExerciseFormState = {
   id: null,
   name: '',
@@ -322,13 +331,22 @@ export function ExercisesPage() {
           {filtered.map((exercise) => (
             <Card key={exercise.id}>
               <div className="flex gap-4">
-                <div className="flex size-20 shrink-0 items-center justify-center rounded-gym bg-gym-bg font-display text-2xl font-bold text-gym-muted">
-                  {exercise.name
-                    .split(' ')
-                    .slice(0, 2)
-                    .map((part) => part[0])
-                    .join('')
-                    .toUpperCase()}
+                <div className="flex size-20 shrink-0 items-center justify-center overflow-hidden rounded-gym border border-gym-border bg-gym-bg font-display text-2xl font-bold text-gym-muted">
+                  {exerciseImageSrc(exercise) ? (
+                    <img
+                      src={exerciseImageSrc(exercise) ?? undefined}
+                      alt={`Referencia visual de ${exercise.name}`}
+                      className="size-full object-cover"
+                      loading="lazy"
+                    />
+                  ) : (
+                    exercise.name
+                      .split(' ')
+                      .slice(0, 2)
+                      .map((part) => part[0])
+                      .join('')
+                      .toUpperCase()
+                  )}
                 </div>
 
                 <div className="min-w-0 flex-1">
