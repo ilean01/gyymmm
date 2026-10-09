@@ -1671,16 +1671,27 @@ app.get('/api/v1/sync/status', async (c) => {
 
 app.get('/api/v1/exercises', requireAuth, async (c) => {
   const userId = c.get('userId')
-  const result = await c.env.gymbro_db
-    .prepare(
-      `SELECT *
-       FROM exercises
-       WHERE archived_at IS NULL
-         AND (is_builtin = 1 OR owner_user_id = ?)
-       ORDER BY name COLLATE NOCASE`,
-    )
-    .bind(userId)
-    .all<ExerciseRow>()
+  const includeArchived = c.req.query('includeArchived') === '1'
+  const result = includeArchived
+    ? await c.env.gymbro_db
+        .prepare(
+          `SELECT *
+           FROM exercises
+           WHERE is_builtin = 1 OR owner_user_id = ?
+           ORDER BY name COLLATE NOCASE`,
+        )
+        .bind(userId)
+        .all<ExerciseRow>()
+    : await c.env.gymbro_db
+        .prepare(
+          `SELECT *
+           FROM exercises
+           WHERE archived_at IS NULL
+             AND (is_builtin = 1 OR owner_user_id = ?)
+           ORDER BY name COLLATE NOCASE`,
+        )
+        .bind(userId)
+        .all<ExerciseRow>()
 
   return c.json({
     ok: true,
@@ -1894,15 +1905,26 @@ app.delete('/api/v1/exercises/:id', requireAuth, async (c) => {
 
 app.get('/api/v1/routines', requireAuth, async (c) => {
   const userId = c.get('userId')
-  const rows = await c.env.gymbro_db
-    .prepare(
-      `SELECT id
-       FROM routines
-       WHERE user_id = ? AND status = 'active'
-       ORDER BY updated_at DESC`,
-    )
-    .bind(userId)
-    .all<{ id: string }>()
+  const includeArchived = c.req.query('includeArchived') === '1'
+  const rows = includeArchived
+    ? await c.env.gymbro_db
+        .prepare(
+          `SELECT id
+           FROM routines
+           WHERE user_id = ?
+           ORDER BY updated_at DESC`,
+        )
+        .bind(userId)
+        .all<{ id: string }>()
+    : await c.env.gymbro_db
+        .prepare(
+          `SELECT id
+           FROM routines
+           WHERE user_id = ? AND status = 'active'
+           ORDER BY updated_at DESC`,
+        )
+        .bind(userId)
+        .all<{ id: string }>()
 
   const routines = []
   for (const row of rows.results ?? []) {
