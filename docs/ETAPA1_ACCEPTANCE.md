@@ -1,125 +1,219 @@
 # Etapa 1 — Checklist de aceptación
 
-Estado: **código y frontend de producción cerrados**. La publicación del
-Worker puede hacerse desde el workflow manual `Deploy GymBro API` una vez que
-GitHub tenga los dos secrets de Cloudflare.
+Estado del código: **cerrado**.
 
-## 101–105 · Robustez y UX
+El objetivo original de la Etapa 1 es que GymBro pueda instalarse en
+celular/notebook, iniciar y completar un entrenamiento sin señal y sincronizar
+los mismos datos entre dispositivos al recuperar conexión.
 
-- [x] 101. Manejo global de errores de render.
-- [x] 101. Errores de API y red con mensajes amigables.
-- [x] 101. Token inválido/vencido limpia la sesión y explica el motivo.
-- [x] 101. Conflictos de sincronización se conservan y no se pisan en silencio.
-- [x] 102. Indicador global: offline / sincronizando / sincronizado / pendiente /
-  conflicto / error.
-- [x] 103. Foco visible, labels, aria-describedby, aria-invalid, tamaños táctiles
-  mínimos y navegación para teclado.
-- [x] 103. Respeto de `prefers-reduced-motion`.
-- [x] 104. Safe areas de iPhone, inputs de 16 px, navegación inferior y
-  touch-action.
-- [x] 105. Sidebar de notebook y ancho de contenido ampliado para escritorio.
+## 1–40 · Base técnica
 
-## 106–108 · GitHub Pages y PWA
+- [x] React + Vite + TypeScript.
+- [x] Tailwind y sistema visual GymBro.
+- [x] Responsive móvil/tablet/notebook.
+- [x] React Router bajo `/gyymmm/`.
+- [x] PWA, manifest, iconos y service worker.
+- [x] Worker Hono + Wrangler.
+- [x] D1 con migraciones.
+- [x] Usuarios, perfiles y sesiones.
+- [x] PBKDF2-HMAC-SHA256.
+- [x] 100.000 iteraciones PBKDF2 verificadas como máximo compatible del
+  runtime Workers probado.
+- [x] JWT con sesión revocable.
+- [x] Registro, login y logout.
+- [x] CORS limitado a orígenes permitidos.
+- [x] Aislamiento por usuario.
+- [x] IndexedDB separado por usuario.
 
-- [x] 106. GitHub Actions instala dependencias y ejecuta validaciones.
-- [x] 106. Build y deploy automático a Pages.
-- [x] 107. Base de Vite y rutas preparadas para `/gyymmm/`.
-- [x] 108. Manifest, iconos y service worker verificados automáticamente.
-- [x] 108. Smoke test real con Chrome headless.
-- [x] 108. El smoke test falla ante errores relevantes de consola/red.
-- [x] 108. Service worker debe quedar `ready` antes del deploy.
+## 41–55 · Offline y sincronización
 
-## 109–112 · Producción Cloudflare
+- [x] Perfil local.
+- [x] Outbox con UUID de mutación, operación, payload, revisión e intentos.
+- [x] Estados synced/pending/syncing/offline/error/conflict.
+- [x] Sync al abrir, reconectar y volver a primer plano.
+- [x] Sincronización automática cada 5 s mientras la app está visible.
+- [x] Acción manual de sincronización.
+- [x] Mutaciones idempotentes.
+- [x] Cursor incremental para sesiones.
+- [x] Cursor temporal incremental para ejercicios, rutinas y snapshots.
+- [x] `rev` para detectar ediciones concurrentes.
+- [x] Conflictos conservan ambas versiones.
+- [x] Resolución explícita: **Usar servidor** o **Conservar lo mío**.
+- [x] Altas de ejercicios/rutinas toleran reintentos sin duplicar.
+- [x] Archivados y borrados viajan como tombstones a los otros dispositivos.
+- [x] Biblioteca inicial de ejercicios.
+- [x] Ilustraciones locales de ejercicios incluidas en el precache PWA.
 
-- [x] 109. `JWT_SECRET` no está en el repositorio.
-- [x] 109. Existe chequeo automático de patrones comunes de secretos.
-- [x] 109. README documenta `wrangler secret put JWT_SECRET`.
-- [x] 110. Todas las migraciones viven en `api/migrations`.
-- [x] 110. El workflow `Deploy GymBro API` aplica migraciones remotas antes del
-  deploy.
-- [x] 111. El workflow publica el Worker con Wrangler.
-- [x] 111. `/health` comprueba secreto + D1 + esquema esperado.
-- [x] 112. El frontend de producción compila contra
-  `gymbro-api.ileanasanabria14.workers.dev`.
-- [x] 112. Autenticación obligatoria en producción.
-- [x] 112. CORS se prueba automáticamente para GitHub Pages y rechaza un origen
-  desconocido.
+## 56–69 · Biblioteca, rutinas y arranque
 
-### Acción de cuenta requerida una sola vez
+- [x] Biblioteca con listado, búsqueda, filtros, imagen, técnica y grupo.
+- [x] Ejercicios personalizados CRUD + offline.
+- [x] Tablas y CRUD de rutinas.
+- [x] CRUD local offline de rutinas.
+- [x] Editor con días, orden, series, reps, peso, descanso y notas.
+- [x] Rutina inicial Pierna y glúteo.
+- [x] Pantalla Hoy sin inventar datos futuros.
+- [x] Tablas de entrenamiento y snapshots.
+- [x] Inicio de sesión offline con outbox.
 
-El workflow de API necesita estos **GitHub Actions secrets**:
+## 70–96 · Entrenamiento completo
+
+- [x] Interfaz completa de entrenamiento.
+- [x] Fichas con imagen, número, objetivo, nota y estados visuales.
+- [x] Peso y repeticiones reales por serie.
+- [x] Persistencia inmediata en IndexedDB.
+- [x] Check de serie y avance automático de ejercicio.
+- [x] Cronómetro por timestamps.
+- [x] Descanso automático, pausa, saltar y +15 s.
+- [x] `restEndsAt` persistente al bloquear/volver.
+- [x] Wake Lock cuando el navegador lo permite.
+- [x] Último rendimiento por ejercicio.
+- [x] Sobrecarga progresiva básica sin IA.
+- [x] Reemplazar/saltar/agregar ejercicios sin alterar la plantilla.
+- [x] Series extra con borrado seguro.
+- [x] Notas por ejercicio.
+- [x] Calentamiento y estiramiento sugeridos.
+- [x] Volumen `peso × reps`.
+- [x] PR de peso, repeticiones y volumen.
+- [x] Confirmación antes de finalizar.
+- [x] Resumen final.
+- [x] Abandonar conservando o descartando.
+- [x] Recuperación de entrenamiento activo.
+
+## 97–100 · Offline y dos dispositivos
+
+Cobertura automatizada:
+
+- [x] La PWA compilada se recarga completamente offline después de registrar el
+  service worker.
+- [x] Repetir la misma mutación conserva la misma revisión.
+- [x] Una segunda sesión autenticada del mismo usuario recibe sesiones,
+  ejercicios del entrenamiento y series.
+- [x] Ediciones stale de sesión generan conflicto y no pisan el servidor.
+- [x] Ediciones stale de ejercicios personalizados generan 409.
+- [x] Ediciones stale de rutinas generan 409.
+- [x] Ediciones stale de snapshots de ejercicios generan 409.
+- [x] Ediciones stale de series generan 409.
+- [x] Archivados de rutina/ejercicio se propagan.
+- [x] Borrado de serie extra se propaga mediante tombstone.
+
+Prueba física recomendada antes de usar GymBro como app cotidiana:
+
+- [ ] instalar/abrir en iPhone y notebook;
+- [ ] hacer un entrenamiento offline real en el iPhone;
+- [ ] bloquear/desbloquear el teléfono;
+- [ ] reconectar;
+- [ ] comprobar en notebook que los datos aparecen sin pulsar sync;
+- [ ] provocar un conflicto real en ambos dispositivos y resolverlo desde Hoy.
+
+La prueba física no modifica el código: valida las particularidades del
+navegador/PWA real del dispositivo.
+
+## 101–105 · Robustez, accesibilidad y UX
+
+- [x] Error boundary global.
+- [x] API/red/token vencido/conflicto con mensajes claros.
+- [x] Indicador global offline/syncing/synced/pending/conflict/error.
+- [x] Inputs con label, aria-invalid y aria-describedby.
+- [x] Foco visible de teclado.
+- [x] Botones táctiles de al menos 44 px.
+- [x] Skip link.
+- [x] `prefers-reduced-motion`.
+- [x] Safe areas de iPhone.
+- [x] Inputs de 16 px para evitar zoom de iOS.
+- [x] Navegación inferior móvil.
+- [x] Sidebar y ancho de contenido de escritorio.
+
+## 106–115 · Deploy y seguridad
+
+- [x] Pages se despliega con GitHub Actions.
+- [x] El workflow exige lint sin warnings.
+- [x] Typecheck del Worker.
+- [x] Tests de API contra D1 local real.
+- [x] Test de aislamiento con dos usuarios.
+- [x] Test de idempotencia y conflictos con dos sesiones del mismo usuario.
+- [x] Build de producción con auth obligatoria.
+- [x] Manifest/iconos/SW verificados.
+- [x] Chrome headless falla ante errores relevantes de consola/red.
+- [x] Recarga offline verificada automáticamente.
+- [x] Escaneo de patrones comunes de secretos en historial.
+- [x] `JWT_SECRET` fuera de Git.
+- [x] Workflow manual **Deploy GymBro API**.
+- [x] El workflow aplica migraciones remotas antes del Worker.
+- [x] El workflow valida `/health`.
+- [x] El workflow ejecuta aceptación + aislamiento contra producción.
+- [x] El workflow limpia sus usuarios CI después de una prueba exitosa.
+
+### Única dependencia externa para publicar el Worker
+
+GitHub Actions necesita:
 
 - `CLOUDFLARE_API_TOKEN`
 - `CLOUDFLARE_ACCOUNT_ID`
 
-No son secretos de la aplicación y nunca deben escribirse en archivos del
-repositorio. Después de configurarlos, ejecutar manualmente el workflow
-**Deploy GymBro API**.
+Son secrets de GitHub Actions y nunca deben guardarse en el repositorio.
 
-## 113–115 · Pruebas y seguridad
-
-- [x] 113. Test automático de registro.
-- [x] 113. Test automático de login correcto e incorrecto.
-- [x] 113. Test automático de email duplicado.
-- [x] 113. Test automático de logout y revocación.
-- [x] 113. CRUD de ejercicios y rutinas probado contra D1 local real.
-- [x] 113. Creación de sesión y series probada contra D1 local real.
-- [x] 114. El test crea dos usuarios distintos.
-- [x] 114. Usuario B no puede editar ejercicio de A.
-- [x] 114. Usuario B no puede editar rutina de A.
-- [x] 114. Usuario B no puede apropiarse de una sesión de A.
-- [x] 114. Usuario B no ve las series privadas de A.
-- [x] 115. `.dev.vars`, `.env` y `.wrangler` están ignorados.
-- [x] 115. El workflow revisa el historial antes del deploy.
+Después de configurarlos, ejecutar manualmente **Deploy GymBro API**. Un run
+verde comprueba migraciones, Worker, health, autenticación, CRUD, aislamiento y
+sincronización en producción.
 
 ## 116 · Plan gratuito
 
-Para uso personal la arquitectura está muy por debajo de los límites normales
-del plan gratuito, pero el consumo real depende de cuánto se use la app.
-Revisar periódicamente Workers y D1 en Cloudflare Metrics/Billing.
+Revisión al 9 de octubre de 2026:
 
-La sincronización cada 5 segundos solo corre mientras la app está visible y
-online; no usa un cron remoto ni mantiene conexiones permanentes.
+- Workers Free: 100.000 requests/día.
+- D1 Free: 5 millones de filas leídas/día.
+- D1 Free: 100.000 filas escritas/día.
+- D1 Free: 5 GB de almacenamiento total.
+
+La sincronización dejó de descargar catálogos completos cada 5 segundos.
+Ahora usa dos pulls incrementales: cursor secuencial para sesiones y cursor
+temporal para dominio/snapshots.
+
+Incluso si una sola PWA permaneciera visible 24 h, dos pulls cada 5 s son
+aproximadamente 34.560 requests/día antes de acciones del usuario, con margen
+respecto de Workers Free. El uso normal de gimnasio es muy inferior. Revisar
+Cloudflare Metrics si el patrón de uso cambia.
 
 ## 117–120 · Calidad y documentación
 
-- [x] 117. Frontend TypeScript compila.
-- [x] 117. API TypeScript compila.
-- [x] 117. ESLint forma parte del gate de deploy.
-- [x] 118. Build final forma parte del workflow.
-- [x] 119. Chrome headless revisa la app compilada.
-- [x] 119. Manifest y service worker se revisan automáticamente.
-- [x] 120. README explica frontend, Worker, D1, migraciones, secretos,
-  arquitectura, pruebas y producción.
+- [x] Frontend TypeScript compila.
+- [x] API TypeScript compila.
+- [x] ESLint tiene tolerancia cero a warnings.
+- [x] Build final obligatorio antes de Pages.
+- [x] Consola del navegador comprobada con Chrome headless.
+- [x] Cero requests fallidos inesperados en el smoke.
+- [x] Manifest, assets, ilustraciones y service worker comprobados.
+- [x] README de arquitectura, desarrollo, migraciones, secretos y deploy.
 
-## 121 · Criterios finales
+## 121 · Checklist funcional
 
-- [x] PWA instalable y con service worker.
-- [x] Login, registro y logout.
-- [x] Aislamiento por usuario.
-- [x] Biblioteca y ejercicios personalizados.
-- [x] Rutina inicial y CRUD de rutinas.
+- [x] PWA instalable por manifest/SW.
+- [x] Login funcional.
+- [x] Datos aislados por usuario.
+- [x] Rutina inicial.
+- [x] Creación/edición de rutinas.
 - [x] Entrenamiento completo.
-- [x] Cronómetro y descanso persistente.
-- [x] Wake Lock cuando el navegador lo admite.
-- [x] Historial y página Progreso.
-- [x] Sobrecarga progresiva básica.
-- [x] Reemplazar / saltar / agregar ejercicios.
-- [x] Series extra y notas.
-- [x] Volumen, récords y resumen final.
-- [x] Entrenamiento offline y recuperación.
-- [x] Outbox, push/pull, cursor, `rev`, idempotencia y conflictos.
-- [x] Sincronización al abrir, volver a primer plano, reconectar y cada 5 s.
-- [x] Deploy automático de GitHub Pages.
-- [x] Pipeline de deploy de Worker preparado y verificable.
+- [x] Temporizadores.
+- [x] Wake Lock progresivo.
+- [x] Historial/Progreso.
+- [x] Sobrecarga progresiva.
+- [x] Cambios temporales de rutina.
+- [x] Offline-first.
+- [x] Sync y conflictos multi-sesión automatizados.
+- [x] Deploy automático de Pages.
+- [x] Pipeline seguro de producción para Worker.
 
 ## 122 · Cierre
 
-La Etapa 1 queda cerrada técnicamente cuando:
+**Código de Etapa 1: cerrado.**
 
-1. el workflow principal de Pages está verde;
-2. el workflow **Deploy GymBro API** está verde;
-3. la prueba física iPhone ↔ notebook confirma la sincronización real en ambos
-   sentidos y el comportamiento al bloquear/desbloquear el teléfono.
+No se agregan Fotos/R2/Bienestar/Coach IA dentro de esta etapa.
 
-Hasta ese momento no se agregan Fotos/R2/Bienestar/Coach IA.
+Para marcar también el **cierre operativo de producción** deben quedar verdes:
+
+1. el workflow principal **Deploy GymBro to GitHub Pages**;
+2. el workflow manual **Deploy GymBro API**;
+3. la prueba física iPhone ↔ notebook descrita arriba.
+
+Eso evita declarar “funciona” basándonos solamente en código o simulación.
