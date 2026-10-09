@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { PageSection } from '../components/layout/AppShell'
 import { Badge, Button, Card, StatePanel } from '../components/ui'
@@ -46,7 +46,7 @@ export function TodayPage() {
   const [isSyncing, setIsSyncing] = useState(false)
   const [message, setMessage] = useState('')
 
-  async function refresh() {
+  const refresh = useCallback(async () => {
     await seedOfflineDomainData()
 
     const [
@@ -68,7 +68,7 @@ export function TodayPage() {
     setQueue(localQueue)
     setConflicts(localConflicts)
     setDisplayName(profile?.displayName ?? null)
-  }
+  }, [])
 
   function conflictLabel(conflict: SyncConflict): string {
     switch (conflict.entityType) {
@@ -108,7 +108,7 @@ export function TodayPage() {
     }
   }
 
-  async function handleSync(showMessage = true) {
+  const handleSync = useCallback(async (showMessage = true) => {
     if (!navigator.onLine) {
       if (showMessage) {
         setMessage('Sin conexión. Tus cambios siguen guardados localmente.')
@@ -142,35 +142,27 @@ export function TodayPage() {
     } finally {
       setIsSyncing(false)
     }
-  }
-
+  }, [refresh])
   useEffect(() => {
-    const initialize = async () => {
-      await refresh()
-
-      if (navigator.onLine) {
-        await handleSync(false)
-      }
-    }
-
-    void initialize()
-  }, [])
+    void refresh()
+  }, [refresh])
 
   useEffect(() => {
     const online = () => {
       setIsOnline(true)
-      void handleSync(false)
+      void refresh()
     }
     const offline = () => {
       setIsOnline(false)
+      void refresh()
     }
 
     window.addEventListener('online', online)
     window.addEventListener('offline', offline)
 
     const interval = window.setInterval(() => {
-      if (navigator.onLine && document.visibilityState === 'visible') {
-        void handleSync(false)
+      if (document.visibilityState === 'visible') {
+        void refresh()
       }
     }, 5000)
 
@@ -179,7 +171,7 @@ export function TodayPage() {
       window.removeEventListener('offline', offline)
       window.clearInterval(interval)
     }
-  }, [])
+  }, [refresh])
 
   const today = new Date()
   const weekday = today.getDay()
