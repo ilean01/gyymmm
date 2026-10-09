@@ -101,6 +101,15 @@ function targetText(set: PlannedWorkoutSet): string {
   return weight + ' · ' + reps
 }
 
+function exerciseImageSrc(exercise: Exercise | undefined): string | null {
+  if (!exercise?.imagePath) return null
+
+  return (
+    import.meta.env.BASE_URL +
+    exercise.imagePath.replace(/^\/+/, '')
+  )
+}
+
 function previousSetText(
   performance: ExerciseLastPerformance | null | undefined,
   setNumber: number,
@@ -956,6 +965,10 @@ export function WorkoutBootstrapPage() {
           const isActive = exercise.status === 'active'
           const isCompleted = exercise.status === 'completed'
           const isSkipped = exercise.status === 'skipped'
+          const catalogExercise = availableExercises.find(
+            (item) => item.id === exercise.exerciseId,
+          )
+          const imageSrc = exerciseImageSrc(catalogExercise)
           const lastPerformance = history[exercise.exerciseId]
           const progression =
             buildProgressiveOverloadSuggestion(lastPerformance)
@@ -973,16 +986,34 @@ export function WorkoutBootstrapPage() {
                 .join(' ')}
             >
               <div className="flex gap-4">
-                <div
-                  className={[
-                    'flex size-16 shrink-0 items-center justify-center rounded-gym border font-display text-2xl font-bold',
-                    isActive
-                      ? 'border-gym-accent bg-gym-accent/10 text-gym-text'
-                      : 'border-gym-border bg-gym-bg text-gym-muted',
-                  ].join(' ')}
-                  aria-label={'Ejercicio ' + String(exerciseIndex + 1)}
-                >
-                  {exerciseIndex + 1}
+                <div className="relative size-20 shrink-0 overflow-hidden rounded-gym border border-gym-border bg-gym-bg">
+                  {imageSrc ? (
+                    <img
+                      src={imageSrc}
+                      alt={`Referencia visual de ${exercise.exerciseName}`}
+                      className="size-full object-cover"
+                    />
+                  ) : (
+                    <div className="flex size-full items-center justify-center font-display text-2xl font-bold text-gym-muted">
+                      {exercise.exerciseName
+                        .split(' ')
+                        .slice(0, 2)
+                        .map((part) => part[0])
+                        .join('')
+                        .toUpperCase()}
+                    </div>
+                  )}
+                  <span
+                    className={[
+                      'absolute bottom-1 left-1 flex size-7 items-center justify-center rounded-full border text-xs font-bold',
+                      isActive
+                        ? 'border-gym-accent bg-gym-accent text-white'
+                        : 'border-gym-border bg-gym-card text-gym-muted',
+                    ].join(' ')}
+                    aria-label={'Ejercicio ' + String(exerciseIndex + 1)}
+                  >
+                    {exerciseIndex + 1}
+                  </span>
                 </div>
 
                 <div className="min-w-0 flex-1">
