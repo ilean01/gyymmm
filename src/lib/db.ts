@@ -834,11 +834,17 @@ export async function resolveSyncConflictWithServer(
     )
     const entityStore = transaction.objectStore(storeName)
 
-    if (conflict.serverPayload === null) {
+    const serverPayload =
+      conflict.serverPayload as Record<string, unknown> | null
+    const isDeletedPlannedSet =
+      conflict.entityType === 'workoutPlanSet' &&
+      typeof serverPayload?.deletedAt === 'string'
+
+    if (serverPayload === null || isDeletedPlannedSet) {
       entityStore.delete(conflict.entityId)
     } else {
       entityStore.put({
-        ...(conflict.serverPayload as Record<string, unknown>),
+        ...serverPayload,
         rev: conflict.serverRev,
         syncState: 'synced',
       })
