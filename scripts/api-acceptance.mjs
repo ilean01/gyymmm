@@ -518,7 +518,7 @@ assert(
   'session conflict must expose the current server revision',
 )
 
-const snapshotExerciseId = crypto.randomUUID()
+const snapshotExerciseId = deviceExerciseId
 const workoutExerciseId = crypto.randomUUID()
 const workoutExerciseSnapshot = {
   id: workoutExerciseId,
