@@ -669,6 +669,39 @@ assert(
   'stale planned set must not overwrite silently',
 )
 
+const domainBeforeArchival = await request(
+  '/api/v1/sync/domain?since=' +
+    encodeURIComponent('1970-01-01T00:00:00.000Z'),
+  { token: userAToken },
+)
+assert(
+  domainBeforeArchival.response.status === 200,
+  'incremental domain bootstrap must work',
+)
+assert(
+  domainBeforeArchival.json.workoutExercises.some(
+    (item) => item.id === workoutExerciseId,
+  ) &&
+    domainBeforeArchival.json.plannedSets.some(
+      (item) => item.id === planSetId,
+    ),
+  'incremental domain bootstrap must include workout snapshots',
+)
+const domainCursorBeforeArchival = domainBeforeArchival.json.cursor
+
+const deletedPlanSet = await request(
+  '/api/v1/workout-plan-sets/' + planSetId + '?rev=2',
+  {
+    method: 'DELETE',
+    token: userA.token,
+  },
+)
+assert(
+  deletedPlanSet.response.status === 200 &&
+    deletedPlanSet.json.rev === 3,
+  'planned-set delete must create a revisioned tombstone',
+)
+
 const archivedExercise = await request(
   '/api/v1/exercises/' + deviceExerciseId + '?rev=2',
   {
@@ -736,6 +769,40 @@ assert(
       item.status === 'archived',
   ),
   'archived routine tombstone must be available to second-device sync',
+)
+
+const domainAfterArchival = await request(
+  '/api/v1/sync/domain?since=' +
+    encodeURIComponent(domainCursorBeforeArchival),
+  { token: userAToken },
+)
+assert(
+  domainAfterArchival.response.status === 200,
+  'incremental domain pull after edits must work',
+)
+assert(
+  domainAfterArchival.json.exercises.some(
+    (item) =>
+      item.id === deviceExerciseId &&
+      item.archivedAt,
+  ),
+  'incremental domain pull must carry exercise archive tombstone',
+)
+assert(
+  domainAfterArchival.json.routines.some(
+    (item) =>
+      item.id === deviceRoutineId &&
+      item.status === 'archived',
+  ),
+  'incremental domain pull must carry routine archive tombstone',
+)
+assert(
+  domainAfterArchival.json.plannedSets.some(
+    (item) =>
+      item.id === planSetId &&
+      item.deletedAt,
+  ),
+  'incremental domain pull must carry planned-set deletion tombstone',
 )
 
 const allowedCors = await fetch(baseUrl + '/api/v1/sync/status', {
