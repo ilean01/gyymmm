@@ -1699,6 +1699,32 @@ app.post('/api/v1/exercises', requireAuth, async (c) => {
   }
 
   const userId = c.get('userId')
+  const existingById = await c.env.gymbro_db
+    .prepare('SELECT * FROM exercises WHERE id = ?')
+    .bind(input.id)
+    .first<ExerciseRow>()
+
+  if (existingById) {
+    if (
+      existingById.owner_user_id === userId &&
+      existingById.is_builtin === 0
+    ) {
+      return c.json({
+        ok: true,
+        exercise: exerciseRowToApi(existingById),
+      })
+    }
+
+    return c.json(
+      {
+        ok: false,
+        error: 'exercise_exists',
+        message: 'El identificador del ejercicio ya está en uso.',
+      },
+      409,
+    )
+  }
+
   const now = new Date().toISOString()
   await c.env.gymbro_db
     .prepare(
@@ -1915,7 +1941,23 @@ app.post('/api/v1/routines', requireAuth, async (c) => {
     .first<{ user_id: string }>()
 
   if (owner) {
-    return c.json({ ok: false, error: 'routine_exists', message: 'La rutina ya existe.' }, 409)
+    if (owner.user_id === userId) {
+      const routine = await getRoutineAggregate(
+        c.env.gymbro_db,
+        userId,
+        input.id,
+      )
+      return c.json({ ok: true, routine })
+    }
+
+    return c.json(
+      {
+        ok: false,
+        error: 'routine_exists',
+        message: 'El identificador de la rutina ya está en uso.',
+      },
+      409,
+    )
   }
 
   const rev = await replaceRoutineAggregate(c.env.gymbro_db, userId, input, null)
