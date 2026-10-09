@@ -8,25 +8,28 @@ import {
   clearRestTimerState,
   getActiveWorkoutSession,
   getPlannedWorkoutSets,
-  getPreviousBestWeight,
+  getPreviousExerciseRecords,
   getWorkoutExercises,
 } from './domain-db'
 import {
   calculateWorkoutVolume,
-  detectWeightRecords,
+  detectPersonalRecords,
 } from './workout-logic'
-import type { WorkoutSummary } from '../types/domain'
+import type {
+  ExerciseRecordBaselines,
+  WorkoutSummary,
+} from '../types/domain'
 import type { WorkoutSession } from '../types/training'
 
 async function buildPreviousBestMap(
   sessionId: string,
   exerciseIds: string[],
-): Promise<Map<string, number>> {
+): Promise<Map<string, ExerciseRecordBaselines>> {
   const unique = Array.from(new Set(exerciseIds))
   const entries = await Promise.all(
     unique.map(async (exerciseId) => [
       exerciseId,
-      await getPreviousBestWeight(exerciseId, sessionId),
+      await getPreviousExerciseRecords(exerciseId, sessionId),
     ] as const),
   )
 
@@ -78,7 +81,7 @@ export async function getWorkoutSummary(
     ).length,
     completedSets: sets.filter((set) => set.completedAt !== null).length,
     volumeKg: calculateWorkoutVolume(sets),
-    personalRecords: detectWeightRecords(sets, previousBest),
+    personalRecords: detectPersonalRecords(sets, previousBest),
   }
 }
 
